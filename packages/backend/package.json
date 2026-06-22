@@ -1,0 +1,29 @@
+{
+  "name": "@bugzar/backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that backs the Bugzar extension (R2 upload + Jira issue creation).",
+  "scripts": {
+    "gen:player": "node ../../scripts/gen-rrweb-player.mjs",
+    "predev": "pnpm gen:player",
+    "dev": "wrangler dev",
+    "predeploy": "pnpm gen:player && pnpm run build:viewer",
+    "build:viewer": "VITE_BASE=/v/ pnpm --filter @bugzar/viewer build && rm -rf public/v && cp -r ../viewer/dist public/v",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "r2:create": "wrangler r2 bucket create bugzar-artifacts",
+    "pretypecheck": "pnpm gen:player",
+    "typecheck": "tsc --noEmit",
+    "pretest": "pnpm gen:player",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "delete-report": "node ../../scripts/delete-report.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260520.1",
+    "rrweb-player": "2.0.0-alpha.20",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8",
+    "wrangler": "4.93.1"
+  }
+}

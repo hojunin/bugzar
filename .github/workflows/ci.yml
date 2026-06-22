@@ -1,0 +1,51 @@
+# PR-17 — PR 검증 파이프라인.
+#
+# pnpm 의존성 캐싱 → 타입 검사 + 단위 테스트 + 확장 빌드 + SRI 검증 + 보안 audit.
+# 모든 잡이 통과해야 PR merge 가능. E2E (Playwright) 는 별도 잡으로 분리해
+# 빠른 피드백 루프를 유지한다.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: pnpm check
+
+      - name: Typecheck — backend
+        run: pnpm --filter @bugzar/backend typecheck
+
+      - name: Typecheck — SDK (the npm-published package)
+        run: pnpm --filter @bugzar/sdk typecheck
+
+      - name: Run all unit tests
+        run: pnpm -r test
+
+      - name: Build SDK (validates tsup config, exports map, .d.ts emit)
+        run: pnpm --filter @bugzar/sdk build
+
+      - name: Security audit (high+)
+        run: pnpm audit --audit-level=high
+        continue-on-error: true

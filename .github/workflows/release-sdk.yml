@@ -1,0 +1,73 @@
+# Publish @bugzar/sdk to npm on a `sdk-v*` tag.
+#
+# Releases are CI-only (no local `npm publish`) so the tarball is reproducibly
+# built from a tagged commit and carries npm provenance. Requires a repo secret
+# `NPM_TOKEN` (an npm automation token with publish rights to the @bugzar scope),
+# or switch to npm Trusted Publishing and drop the token.
+
+name: Release SDK
+
+on:
+  push:
+    tags: ['sdk-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance (OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Fail fast (before the expensive install/build) if the tag and the
+      # package version disagree — otherwise `sdk-v0.0.2` would silently publish
+      # whatever package.json says (e.g. a mislabeled 0.0.1).
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        working-directory: packages/sdk
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#sdk-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME (version $TAG_VERSION) does not match packages/sdk/package.json version $PKG_VERSION. Bump package.json or retag."
+            exit 1
+          fi
+          echo "Tag matches package version: $PKG_VERSION"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck + test SDK
+        run: pnpm --filter @bugzar/sdk typecheck && pnpm --filter @bugzar/sdk test
+
+      - name: Build SDK
+        run: pnpm --filter @bugzar/sdk build
+
+      # Idempotent: skip if this version is already on npm, so re-running the
+      # workflow (or a retry) doesn't fail with npm's 403 "cannot publish over
+      # existing version".
+      - name: Publish to npm (provenance + public)
+        working-directory: packages/sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "@bugzar/sdk@$VERSION" version >/dev/null 2>&1; then
+            echo "@bugzar/sdk@$VERSION already published — skipping (idempotent re-run)."
+            exit 0
+          fi
+          npm publish --provenance --access public

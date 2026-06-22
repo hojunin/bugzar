@@ -1,0 +1,99 @@
+name = "bugzar-backend"
+main = "src/worker.ts"
+compatibility_date = "2024-12-15"
+# Workers' default URL is `https://bugzar-backend.<your-subdomain>.workers.dev`.
+# Add `routes` here once you wire a custom domain.
+
+# Bundle the @bugzar/viewer SPA as static assets, served same-origin under `/v/`.
+# One `wrangler deploy` ships the Worker API + the viewer (no separate Pages
+# deploy). `predeploy` builds the viewer (base=/v/) into ./public/v; asset misses
+# fall through to the Worker, so the API routes are unaffected.
+[assets]
+directory = "./public"
+
+# R2 binding. The bucket holds exported replay HTML (one object per session
+# upload). Create it once via `pnpm --filter @bugzar/backend r2:create` or
+# directly in the dashboard.
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "bugzar-artifacts"
+preview_bucket_name = "bugzar-artifacts"
+
+# Workers AI binding — Llama 3.1 8B for /jira/draft. No setup beyond this
+# stanza; Workers AI is available on the Free plan up to 10,000 neurons/day.
+[ai]
+binding = "AI"
+
+# PR-18 — Cron Trigger for daily retention cleanup.
+#   - Removes orphaned uploads (no replay.html, > 24h old)
+#   - Removes expired reports (> 6 months old)
+# Runs once a day at 02:00 UTC (11:00 KST) so the heavy R2 list/delete pass
+# falls outside business hours.
+[triggers]
+crons = ["0 2 * * *"]
+
+# Workers Analytics Engine — telemetry sink. The dataset is free up to
+# 100k writes/day. The endpoint gracefully degrades to console.log when
+# the binding is absent.
+[[analytics_engine_datasets]]
+binding = "BUGZAR_ANALYTICS"
+dataset = "bugzar"
+
+# Public host the Worker advertises for artifact URLs. By default we proxy
+# `/artifacts/:key` through the Worker itself, so this is just the Worker's
+# own origin. Override (via `wrangler secret put PUBLIC_HOST`) when you front
+# the bucket with a CDN / R2 public domain and want signed-shorter URLs.
+[vars]
+PUBLIC_HOST = ""
+# Phase B — public-deploy hardening. Uncomment PUBLIC_DEPLOY on any
+# internet-exposed Worker: an unset ALLOWED_ORIGINS then fails CLOSED (no
+# anonymous writes/publish) and the `/` enumeration index is hidden. Set
+# PUBLIC_INDEX = "1" to re-expose the index. Also set the UPLOAD_SECRET secret
+# (below) so asset writes are bound to the report that issued the token.
+# PUBLIC_DEPLOY = "1"
+# PUBLIC_INDEX = "1"
+#
+#   wrangler secret put UPLOAD_SECRET     # long random string (binds writes ↔ report)
+#   wrangler secret put ALLOWED_ORIGINS   # https://app.yourco.com,https://staging.yourco.com
+#
+# Clients: the SDK (running in your web app) sends a normal browser Origin, so
+# ALLOWED_ORIGINS covers it. The bundled Chrome extension authenticates writes
+# with the UPLOAD_SECRET token instead (it echoes `X-Upload-Token`) — an
+# extension service-worker may not send an app Origin, so if you use the
+# extension AND set ALLOWED_ORIGINS, also allowlist its `chrome-extension://<id>`
+# origin (or rely on UPLOAD_SECRET and leave ALLOWED_ORIGINS unset).
+#
+# Jira proxy is wired up but kept inert until you fill in real credentials.
+# Set these via `wrangler secret put` — do NOT commit them.
+#   wrangler secret put JIRA_API_BASE
+#   wrangler secret put JIRA_EMAIL
+#   wrangler secret put JIRA_API_TOKEN
+#   wrangler secret put JIRA_PROJECT_KEY
+#
+# PR-16: admin bearer token for `DELETE /reports/:id` + the
+# `scripts/delete-report.mjs` CLI. Leave unset in dev/staging to short-circuit
+# the endpoint to 501. Rotate via `wrangler secret put ADMIN_SECRET`.
+#
+# PR-24 — server-side Atlassian OAuth credentials. Required when the
+# extension calls `/oauth/exchange` (env VITE_OAUTH_VIA_WORKER=1). Both
+# secrets must be set together; otherwise the endpoint returns 501.
+#   wrangler secret put ATLASSIAN_CLIENT_ID
+#   wrangler secret put ATLASSIAN_CLIENT_SECRET
+
+# PR-17 — Preview environment used by the deploy-backend workflow on every
+# pull request. Production stays on `bugzar-backend` / `bugzar-artifacts`; preview
+# is isolated to its own bucket so PR experiments can't corrupt prod data.
+# Create the bucket once via `wrangler r2 bucket create bugzar-artifacts-preview`.
+[env.preview]
+name = "bugzar-backend-preview"
+[env.preview.ai]
+binding = "AI"
+[[env.preview.r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "bugzar-artifacts-preview"
+preview_bucket_name = "bugzar-artifacts-preview"
+[[env.preview.analytics_engine_datasets]]
+binding = "BUGZAR_ANALYTICS"
+dataset = "bugzar_preview"
+[env.preview.vars]
+PUBLIC_HOST = ""

@@ -1,0 +1,3 @@
+# Built @bugzar/viewer bundle, copied in by `build:viewer` before deploy.
+# `public/_headers` is committed; the SPA build is not.
+public/v/

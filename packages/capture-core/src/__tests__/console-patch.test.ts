@@ -1,0 +1,112 @@
+// @vitest-environment happy-dom
+/**
+ * console-patch captures the 5 standard levels (log/info/warn/error/debug)
+ * AND the 3 grouping markers (group/groupCollapsed/groupEnd) so the viewer
+ * can reconstruct nested folds. The patch loop is uniform — these tests
+ * pin the contract that every patched method actually emits an entry.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installConsolePatch, uninstallConsolePatch } from '../console-patch';
+
+let entries: Array<{ level: string; args: string[] }>;
+const originalConsole: Record<string, unknown> = {};
+
+beforeEach(() => {
+  entries = [];
+  // Snapshot every level we patch so afterEach can fully restore even if
+  // a test throws mid-flow.
+  for (const k of [
+    'log',
+    'info',
+    'warn',
+    'error',
+    'debug',
+    'group',
+    'groupCollapsed',
+    'groupEnd',
+  ] as const) {
+    originalConsole[k] = (console as unknown as Record<string, unknown>)[k];
+  }
+  installConsolePatch({
+    sessionStart: Date.now(),
+    onEntry: (e) => entries.push({ level: e.level, args: e.args }),
+  });
+});
+
+afterEach(() => {
+  uninstallConsolePatch();
+  for (const [k, v] of Object.entries(originalConsole)) {
+    (console as unknown as Record<string, unknown>)[k] = v;
+  }
+  vi.restoreAllMocks();
+});
+
+describe('console-patch — standard log levels', () => {
+  it('captures log/info/warn/error/debug', () => {
+    console.log('a');
+    console.info('b');
+    console.warn('c');
+    console.error('d');
+    console.debug('e');
+    expect(entries.map((x) => x.level)).toEqual(['log', 'info', 'warn', 'error', 'debug']);
+  });
+});
+
+describe('console-patch — secret redaction', () => {
+  // S-8: apps routinely log auth responses/tokens. Captured console args go to
+  // the public-by-URL replay, so token-shaped values must be scrubbed.
+  const JWT =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+
+  it('redacts token-shaped console args', () => {
+    console.log('auth', `Bearer ${JWT}`);
+    const entry = entries.find((e) => e.args[0] === 'auth');
+    expect(entry).toBeTruthy();
+    const joined = entry!.args.join(' ');
+    expect(joined).not.toContain(JWT);
+    expect(joined).toContain('[REDACTED]');
+  });
+});
+
+describe('console-patch — grouping markers', () => {
+  // happy-dom's console.group implementation also invokes console.log
+  // internally, so calls produce a `group` entry AND a downstream `log`
+  // entry. We assert the `group` entry exists; the real browser doesn't
+  // re-enter like that. The downstream noise is acceptable in tests.
+
+  it('captures console.group with its label', () => {
+    console.group('[API@x] f154ga GET /api/products');
+    expect(entries).toContainEqual({
+      level: 'group',
+      args: ['[API@x] f154ga GET /api/products'],
+    });
+  });
+
+  it('captures console.groupCollapsed distinct from group', () => {
+    console.groupCollapsed('start collapsed');
+    expect(entries).toContainEqual({
+      level: 'groupCollapsed',
+      args: ['start collapsed'],
+    });
+  });
+
+  it('captures console.groupEnd', () => {
+    console.groupEnd();
+    expect(entries.some((e) => e.level === 'groupEnd')).toBe(true);
+  });
+
+  it('captures the 3 marker types so the viewer can stack-pair', () => {
+    console.group('outer');
+    console.log('child');
+    console.groupEnd();
+    const levels = entries.map((x) => x.level);
+    // Marker order must hold (children may be intermixed by host impl).
+    const groupIdx = levels.indexOf('group');
+    const logIdx = levels.indexOf('log');
+    const groupEndIdx = levels.indexOf('groupEnd');
+    expect(groupIdx).toBeGreaterThanOrEqual(0);
+    expect(logIdx).toBeGreaterThan(groupIdx);
+    expect(groupEndIdx).toBeGreaterThan(logIdx);
+  });
+});

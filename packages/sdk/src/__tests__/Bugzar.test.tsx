@@ -1,0 +1,152 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Drive the component without real rrweb capture — the capture engine is
+// covered by @bugzar/capture-core's own suite. Here we pin the SDK wiring:
+// FAB → start → REC pill → stop → callbacks fire with the bundle.
+const bundle = {
+  events: [{ type: 2 }],
+  console: [{ level: 'log' as const, tFromStart: 0, args: ['hi'] }],
+  network: [],
+  storage: [],
+  vitals: {},
+  meta: {
+    url: 'https://example.com',
+    userAgent: 'test',
+    viewport: { width: 800, height: 600 },
+    startedAt: 1000,
+    endedAt: 2000,
+    durationMs: 1000,
+  },
+};
+
+vi.mock('@bugzar/capture-core', () => {
+  let active = false;
+  return {
+    createRecorder: () => ({
+      start: () => {
+        active = true;
+      },
+      stop: () => {
+        active = false;
+        return bundle;
+      },
+      isActive: () => active,
+    }),
+  };
+});
+
+import { Bugzar } from '../Bugzar';
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe('Bugzar', () => {
+  it('mounts the FAB into document.body via portal', () => {
+    render(<Bugzar />);
+    expect(screen.getByLabelText('Start recording')).toBeTruthy();
+  });
+
+  it('start shows the REC pill and fires onStart', () => {
+    const onStart = vi.fn();
+    render(<Bugzar onStart={onStart} />);
+
+    fireEvent.click(screen.getByLabelText('Start recording'));
+
+    expect(onStart).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Stop recording')).toBeTruthy();
+  });
+
+  it('stop returns to the FAB (no sink configured)', () => {
+    render(<Bugzar />);
+
+    fireEvent.click(screen.getByLabelText('Start recording'));
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+
+    expect(screen.getByLabelText('Start recording')).toBeTruthy();
+  });
+});
+
+describe('Bugzar autoHide', () => {
+  const widget = () => document.querySelector('.bugzar-root');
+  const revealed = () => widget()?.getAttribute('data-bugzar-revealed');
+  // Geometric hover is decided from clientX/Y vs innerWidth/Height, so a raw
+  // pointermove on window drives the component (no layout needed in happy-dom).
+  const move = (clientX: number, clientY: number) =>
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX, clientY }));
+    });
+  const cornerX = () => window.innerWidth - 10;
+  const cornerY = () => window.innerHeight - 5;
+  const centerX = () => Math.floor(window.innerWidth / 2);
+  const centerY = () => Math.floor(window.innerHeight / 2);
+
+  it('off (default): toolbar has no data-bugzar-revealed, FAB renders as today', () => {
+    render(<Bugzar />);
+    expect(widget()).toBeTruthy();
+    expect(widget()?.hasAttribute('data-bugzar-revealed')).toBe(false);
+    expect(screen.getByLabelText('Start recording')).toBeTruthy();
+  });
+
+  it('on: mounts collapsed (revealed=false), toolbar inert + aria-hidden', () => {
+    render(<Bugzar autoHide />);
+    expect(revealed()).toBe('false');
+    expect(widget()?.getAttribute('aria-hidden')).toBe('true');
+    expect(widget()?.hasAttribute('inert')).toBe(true);
+  });
+
+  it('pointermove into the corner hotspot reveals it', () => {
+    render(<Bugzar autoHide />);
+    move(cornerX(), cornerY());
+    expect(revealed()).toBe('true');
+    // revealed → no longer hidden from a11y tree
+    expect(widget()?.hasAttribute('inert')).toBe(false);
+  });
+
+  it('pointermove away from the corner collapses it again', () => {
+    render(<Bugzar autoHide />);
+    move(cornerX(), cornerY());
+    expect(revealed()).toBe('true');
+    move(centerX(), centerY());
+    expect(revealed()).toBe('false');
+  });
+
+  it('stays pinned (revealed) while recording, even with the cursor away', () => {
+    render(<Bugzar autoHide />);
+    move(cornerX(), cornerY());
+    fireEvent.click(screen.getByLabelText('Start recording'));
+    move(0, 0); // cursor off the hotspot — in-use must keep it open
+    expect(revealed()).toBe('true');
+  });
+
+  it('after a use ends, holds the idle toolbar for 2s then collapses', () => {
+    render(<Bugzar autoHide />);
+    move(cornerX(), cornerY());
+    fireEvent.click(screen.getByLabelText('Start recording'));
+    move(0, 0); // away, so only in-use/grace can keep it open
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    expect(revealed()).toBe('true'); // 2s grace holds it
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(revealed()).toBe('false');
+  });
+
+  it('re-entering the hotspot during grace keeps it open past 2s', () => {
+    render(<Bugzar autoHide />);
+    move(cornerX(), cornerY());
+    fireEvent.click(screen.getByLabelText('Start recording'));
+    fireEvent.click(screen.getByLabelText('Stop recording'));
+    // cursor is still in the corner → after grace expires hover keeps it open
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(revealed()).toBe('true');
+  });
+});

@@ -1,0 +1,9 @@
+[
+  { "level": "log", "tFromStart": 200, "args": ["page ready"] },
+  {
+    "level": "error",
+    "tFromStart": 1500,
+    "args": ["Checkout failed: payment declined"],
+    "stack": "Error: payment declined\n    at submitCheckout (checkout.tsx:142:11)\n    at onClick (CheckoutButton.tsx:23:5)"
+  }
+]

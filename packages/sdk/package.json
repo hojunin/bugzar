@@ -1,0 +1,91 @@
+{
+  "name": "@bugzar/sdk",
+  "version": "0.0.1",
+  "description": "Embeddable in-app QA session recorder — rrweb DOM + console + network + storage capture for any React frontend. Drop in <Bugzar />.",
+  "license": "Apache-2.0",
+  "author": "Bugzar contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hojunin/bugzar.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/hojunin/bugzar/tree/main/packages/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/hojunin/bugzar/issues"
+  },
+  "keywords": [
+    "rrweb",
+    "session-replay",
+    "qa",
+    "bug-report",
+    "react",
+    "screen-recorder",
+    "devtools"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./export": {
+      "types": "./dist/export.d.ts",
+      "import": {
+        "types": "./dist/export.d.ts",
+        "default": "./dist/export.js"
+      },
+      "require": {
+        "types": "./dist/export.d.cts",
+        "default": "./dist/export.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.map"
+  ],
+  "scripts": {
+    "gen:viewer": "pnpm --filter @bugzar/viewer build:inline && node ../../scripts/gen-viewer-asset.mjs",
+    "prebuild": "pnpm gen:viewer",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "pretypecheck": "pnpm gen:viewer",
+    "typecheck": "tsc --noEmit",
+    "pretest": "pnpm gen:viewer",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@bugzar/capture-core": "workspace:*",
+    "@bugzar/shared": "workspace:*",
+    "@testing-library/react": "16.1.0",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "@vitejs/plugin-react": "4.3.4",
+    "happy-dom": "15.11.7",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "tsup": "8.3.5",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  }
+}
