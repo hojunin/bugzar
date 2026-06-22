@@ -16,20 +16,12 @@ npm install @bugzar/sdk
 
 ### 길 1 — 배포 없이 (즉시·무료)
 
-서버 없이 캡처해 self-contained 리플레이 HTML 을 **로컬로 내려받아** 슬랙·이슈에 직접 첨부한다. `endpoint` 가 없을 때 `onExport` 가 받는 blob 이 곧 그 HTML 이다.
+서버 없이 캡처해 self-contained 리플레이 HTML 을 **로컬로 내려받아** 슬랙·이슈에 직접 첨부한다. `endpoint` 가 없을 때 `onExport` 가 받는 blob 이 곧 그 HTML 이고, 번들된 `downloadReplay` 헬퍼가 그걸 바로 파일로 저장한다.
 
 ```tsx
-import { Bugzar } from '@bugzar/sdk';
+import { Bugzar, downloadReplay } from "@bugzar/sdk";
 
-const download = (blob: Blob, name: string) => {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
-};
-
-<Bugzar onExport={async (blob, meta) => download(blob, `qa-${meta.startedAt}.html`)} />
+<Bugzar onExport={downloadReplay} />;
 ```
 
 우하단 플로팅 **QA** 버튼 → 녹화 → 정지 → 더블클릭하면 오프라인에서 바로 열리는 HTML 이 떨어진다. (공유 URL 이 필요하면 같은 blob 을 본인 스토리지(S3/R2/…)에 올리고 그 URL 을 반환하면 된다.) **Jira 자동 발행·호스팅 리플레이는 길 2.** props·privacy·헤드리스 훅(`useBugzar`)은 [`packages/sdk/README.md`](./packages/sdk/README.md).
@@ -138,8 +130,3 @@ Backend 배포·OAuth 앱 등록·R2/Workers AI 셋업: [`docs/SETUP.md`](./docs
 - SDK 통합·props·Jira 발행·privacy: [`packages/sdk/README.md`](./packages/sdk/README.md)
 - SDK 빠른 셀프호스팅(Worker 5분): [`docs/self-hosting-sdk.md`](./docs/self-hosting-sdk.md)
 - 기여 방법: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · 보안 신고: [`SECURITY.md`](./SECURITY.md)
-
-## 알려진 한계 / 거버넌스
-
-- iframe 안 picker 미지원 · R2 retention(기본 6개월 만료, `wrangler.toml` `[triggers]`) 외에는 영구 보존 · 발행된 리포트는 viewer 템플릿이 R2 에 baked 라 retro fix 불가(새 발행부터) · 한국어 reproSteps 품질은 5–10건 sampling 모니터링 중
-- R2 자산은 retention cron 외에 영구 보존되고 사용자-facing 삭제 UI 는 없음(어드민 `DELETE /reports/:id` 만 존재). 인증 페이지 캡처에 민감 데이터가 포함될 수 있으므로 **신뢰된 사용자 대상 내부 배포**를 권장. 리플레이 URL 은 public-by-URL 이며, CORS 기본값 `*` — 운영 시 본인 origin 으로 제한할 것.

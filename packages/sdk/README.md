@@ -136,6 +136,9 @@ exported for programmatic use.
 inlined). Upload it to any static host (S3, R2, GitHub Pages, …) and that URL is
 the shareable replay — no Bugzar backend needed.
 
+Just want a file to attach (no host)? The SDK ships **`downloadReplay`** — a
+drop-in `onExport` that saves the HTML to disk: `<Bugzar onExport={downloadReplay} />`.
+
 ```tsx
 <Bugzar
   onExport={async (blob, meta) => {

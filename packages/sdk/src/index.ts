@@ -11,6 +11,8 @@
 
 export type { BugzarProps } from './Bugzar';
 export { Bugzar } from './Bugzar';
+// Drop-in `onExport` that saves the replay HTML to disk (no-`endpoint` path).
+export { downloadReplay } from './download';
 export type { PickerHandle, PickerOptions } from './picker/picker';
 // Programmatic design picker (also driven by the toolbar "Pick" button).
 export { startDesignPick } from './picker/picker';
