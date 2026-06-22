@@ -36,12 +36,11 @@ describe('asset upload — R2 receives a length-known body', () => {
       body: '{"smoke":true}',
       headers: { 'content-type': 'application/json' },
     });
-    const rawBody = req.body;
-
     const res = await worker.fetch(req, env);
 
     expect(res.status).toBe(200);
-    // Same stream instance → not piped through a length-less TransformStream.
-    expect(getPutValue()).toBe(rawBody);
+    // Prod R2 requires a known length; the buggy code passed a bare
+    // TransformStream. The fix buffers to a length-known ArrayBuffer.
+    expect(getPutValue()).toBeInstanceOf(ArrayBuffer);
   });
 });

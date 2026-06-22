@@ -232,6 +232,31 @@ const overSizeLimit = (req: Request, asset?: AssetName): boolean => {
   return Number.isFinite(declared) && declared > assetCap(asset);
 };
 
+/** Sentinel so only the cap abort (not other R2 errors) maps to 413. */
+const ASSET_TOO_LARGE = 'asset too large';
+
+/**
+ * Enforce the cap on the ACTUAL bytes, not just the declared Content-Length —
+ * a chunked or header-omitted PUT otherwise streams straight past the ceiling
+ * (`overSizeLimit` only sees the header). Counts bytes as R2 pulls the body and
+ * aborts the stream once it exceeds `cap`, so the size guard can't be bypassed
+ * by simply omitting/understating Content-Length.
+ */
+const capBodyStream = (
+  body: ReadableStream<Uint8Array>,
+  cap: number,
+): ReadableStream<Uint8Array> => {
+  let total = 0;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        total += chunk.byteLength;
+        if (total > cap) controller.error(new Error(ASSET_TOO_LARGE));
+        else controller.enqueue(chunk);
+      },
+    }),
+  );
+};
 
 /**
  * Allowed asset names. Anything else returns 400 from PUT/GET — prevents
@@ -354,10 +379,18 @@ const handlePutAsset = async (
   const contentType = req.headers.get('content-type') ?? assetContentType(asset);
   const mime = contentType.split(';')[0]?.trim();
   const key = r2KeyFor(reportId, asset, mime);
-  // Stream the raw request body straight to R2. Piping it through a
-  // TransformStream (the old capBodyStream) drops the known length, and prod R2
-  // then rejects the put — the size guard stays on `overSizeLimit` above.
-  await env.ARTIFACTS.put(key, req.body, {
+  // Cap the ACTUAL bytes, then buffer to a length-known ArrayBuffer: prod R2
+  // rejects a bare TransformStream (no known length), and capBodyStream still
+  // aborts mid-stream if the body runs past the cap.
+  let payload: ArrayBuffer;
+  try {
+    payload = await new Response(capBodyStream(req.body, assetCap(asset))).arrayBuffer();
+  } catch (e) {
+    if (e instanceof Error && e.message === ASSET_TOO_LARGE)
+      return errorResponse(413, 'asset too large');
+    throw e;
+  }
+  await env.ARTIFACTS.put(key, payload, {
     httpMetadata: {
       contentType,
       // Per-report ids are unique → assets are immutable, cache hard.
@@ -385,7 +418,17 @@ const handlePutElementScreenshot = async (
     return errorResponse(401, 'invalid upload token');
   if (overSizeLimit(req, 'screenshot')) return errorResponse(413, 'asset too large');
   const key = `reports/${reportId}/elements/${elementId}.png`;
-  await env.ARTIFACTS.put(key, req.body, {
+  let payload: ArrayBuffer;
+  try {
+    payload = await new Response(
+      capBodyStream(req.body, assetCap('screenshot')),
+    ).arrayBuffer();
+  } catch (e) {
+    if (e instanceof Error && e.message === ASSET_TOO_LARGE)
+      return errorResponse(413, 'asset too large');
+    throw e;
+  }
+  await env.ARTIFACTS.put(key, payload, {
     httpMetadata: {
       contentType: 'image/png',
       cacheControl: 'public, max-age=31536000, immutable',
