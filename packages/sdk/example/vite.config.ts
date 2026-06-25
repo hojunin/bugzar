@@ -38,6 +38,17 @@ const mockApi = (): Plugin => ({
       sendJson(res, { ok, orderId: ok ? 'ord_123' : null }, ok ? 201 : 405);
     });
 
+    // A real server error WITH a JSON error body — exercises R1a (Copy-for-AI now
+    // carries the request payload + this response body) and the diagnostic-bar
+    // headline ("POST /api/checkout → 500").
+    server.middlewares.use('/api/checkout', (_req, res) => {
+      sendJson(
+        res,
+        { error: 'OUT_OF_STOCK', detail: 'sku WIDGET-1 has 0 available', traceId: 'trace_abc123' },
+        500,
+      );
+    });
+
     // ── mock Worker: report allocation + asset PUTs + publish ──
     server.middlewares.use('/reports', (req: IncomingMessage, res) => {
       const url = req.url ?? '';

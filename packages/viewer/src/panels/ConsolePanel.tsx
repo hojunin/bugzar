@@ -1,5 +1,8 @@
 import type { ConsoleEntry } from '@bugzar/shared';
 import { useState } from 'react';
+import { formatConsoleErrorForAI } from '../report/ai-context';
+import type { ReportData } from '../report/types';
+import { CopyForAiButton } from '../ui/CopyForAiButton';
 import { JsonTree, maybeJson } from '../ui/JsonTree';
 import { matchesQuery } from './filters';
 import { isThirdParty } from './third-party';
@@ -12,6 +15,8 @@ export interface ConsolePanelProps {
   onSeek: (tFromStart: number) => void;
   /** Include third-party (datadog/amplitude/…) logs. Default false (hidden). */
   includeThirdParty?: boolean;
+  /** Full report — enables per-error "Copy for AI" (B2). Omit to hide it. */
+  report?: ReportData;
 }
 
 const fmt = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
@@ -80,6 +85,7 @@ export function ConsolePanel({
   currentTime,
   onSeek,
   includeThirdParty = false,
+  report,
 }: ConsolePanelProps) {
   const tree = buildTree(entries);
   const active = activeIndex(entries, currentTime);
@@ -163,11 +169,26 @@ export function ConsolePanel({
           <span className={`bugzarv-badge${e.level === 'error' ? ' bugzarv-badge-error' : ''}`}>
             {e.level}
           </span>
+          {e.kind === 'unhandledrejection' ? (
+            <span className="bugzarv-kind" title="unhandled rejection">
+              rejection
+            </span>
+          ) : null}
+          {e.kind === 'csp' ? (
+            <span className="bugzarv-kind" title="CSP violation">
+              CSP
+            </span>
+          ) : null}
           <span className="bugzarv-time">{fmt(e.tFromStart)}</span>
           <span className="bugzarv-msg">{e.args.join(' ')}</span>
         </button>
         {open ? (
           <div className="bugzarv-detail">
+            {report && e.level === 'error' ? (
+              <div className="bugzarv-detail-copy">
+                <CopyForAiButton getText={() => formatConsoleErrorForAI(e, report)} />
+              </div>
+            ) : null}
             {e.args.map((a) => {
               const json = maybeJson(a);
               return json !== null && typeof json === 'object' ? (
@@ -179,6 +200,12 @@ export function ConsolePanel({
               );
             })}
             {e.stack ? <pre className="bugzarv-detail-body">{e.stack}</pre> : null}
+            {e.source ? (
+              <div className="bugzarv-detail-meta">
+                source: {e.source.file}:{e.source.line}:{e.source.col}
+              </div>
+            ) : null}
+            {e.cause ? <pre className="bugzarv-detail-body">{e.cause}</pre> : null}
           </div>
         ) : null}
       </div>

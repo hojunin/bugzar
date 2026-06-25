@@ -111,6 +111,40 @@ export function App() {
         >
           Log error
         </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => {
+            // Real 5xx WITH request payload + JSON error body → shows up in the
+            // report's diagnostic bar + Copy-for-AI (request + response bodies).
+            fetch('/api/checkout', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sku: 'WIDGET-1', qty: 3, coupon: 'SAVE10' }),
+            })
+              .then((r) => r.json())
+              .then((d) => console.error('[demo] POST /api/checkout failed', d))
+              .catch(() => {});
+          }}
+        >
+          Checkout (fails 500)
+        </button>
+        <button
+          type="button"
+          style={buttonStyle}
+          onClick={() => {
+            // Thrown async → window.onerror captures stack + source(file:line) +
+            // error.cause chain (R2b). Dev build is unminified, so "Where to look"
+            // promotes the symbolic frame.
+            setTimeout(() => {
+              throw Object.assign(new Error('Render crashed reading cart.total'), {
+                cause: new Error('cart is null'),
+              });
+            }, 0);
+          }}
+        >
+          Throw error
+        </button>
       </div>
 
       <ul>

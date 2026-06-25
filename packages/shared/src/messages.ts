@@ -23,6 +23,16 @@ export type ConsoleEntry = {
   tFromStart: number;
   args: string[]; // pre-stringified for transport
   stack?: string;
+  // --- R2b location signals (additive-optional; NO SCHEMA_VERSION bump). Older
+  // viewers ignore these; the version gate keys on the integer, not field shape.
+  /** Origin from `ErrorEvent` (file:line:col). Bundle coords in prod — low value
+   *  until source maps (R3a); the viewer cites it but never promotes a raw
+   *  minified `:1:NNNN` to a "location". */
+  source?: { file: string; line: number; col: number };
+  /** Flattened `error.cause` chain (messages + frame-capped stacks), redacted. */
+  cause?: string;
+  /** Origin discriminator (for viewer badges). Absent ⇒ a plain console call. */
+  kind?: 'error' | 'unhandledrejection' | 'console' | 'csp';
 };
 
 export type NetworkEntryPayload = {
@@ -37,6 +47,8 @@ export type NetworkEntryPayload = {
   responseBody: string | null;
   error: string | null;
   initiator: 'fetch' | 'xhr';
+  /** R2c: opaque fetch failure that is *likely* CORS (heuristic, not asserted). */
+  corsLikely?: boolean;
 };
 
 export type StorageSnapshotPayload = {

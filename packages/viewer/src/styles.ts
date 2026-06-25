@@ -19,15 +19,62 @@ body { margin: 0; }
   font-family: ui-monospace, monospace; word-break: break-all;
 }
 
-.bugzarv-meta {
-  display: flex; gap: 16px; align-items: center;
-  padding: 8px 16px; border-bottom: 1px solid #27272a;
-  background: #1f1f23; flex: 0 0 auto;
+/* min-width:0 is load-bearing: without it this intermediate flex column adopts
+   its content's intrinsic min-width, so a wide rrweb replay overflows and the
+   player mis-measures its width (page renders too wide → cropped on the right). */
+/* Slim URL-only header for design reports (no diagnostic bar there). */
+.bugzarv-urlbar {
+  flex: 0 0 auto; padding: 8px 16px; border-bottom: 1px solid #27272a; background: #1f1f23;
+  font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.bugzarv-meta-url { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bugzarv-meta-field { color: #a1a1aa; font-family: ui-monospace, monospace; flex: 0 0 auto; }
+.bugzarv-session-col { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.bugzarv-session { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
 
-.bugzarv-session { display: flex; flex: 1 1 auto; min-height: 0; }
+/* A1/B1 — diagnostic bar: compact, sticky, bounded (never a full screen) */
+.bugzarv-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.bugzarv-diag {
+  flex: 0 0 auto; position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid #27272a; background: #1f1f23;
+  border-left: 3px solid #52525b; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.bugzarv-diag-error { border-left-color: #f87171; }
+.bugzarv-diag-warn { border-left-color: #fbbf24; }
+.bugzarv-diag-ok { border-left-color: #34d399; }
+.bugzarv-diag-main { display: flex; align-items: center; gap: 10px; flex: 1 1 320px; min-width: 0; }
+.bugzarv-diag-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #52525b; }
+.bugzarv-diag-error .bugzarv-diag-dot { background: #f87171; }
+.bugzarv-diag-warn .bugzarv-diag-dot { background: #fbbf24; }
+.bugzarv-diag-ok .bugzarv-diag-dot { background: #34d399; }
+.bugzarv-diag-headline {
+  margin: 0; min-width: 0; font-size: 16px; font-weight: 600; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bugzarv-diag-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.bugzarv-diag-chip {
+  flex: 0 0 auto; border: 1px solid #3f3f46; background: #27272a; color: #d4d4d8;
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.bugzarv-diag-chip:hover { background: #3f3f46; }
+.bugzarv-diag-chip-error { color: #fca5a5; border-color: rgba(248, 113, 113, 0.4); }
+.bugzarv-diag-chip-failed { color: #fdba74; border-color: rgba(251, 146, 60, 0.4); }
+.bugzarv-diag-copy { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
+.bugzarv-diag-infowrap { position: relative; flex: 0 0 auto; display: inline-flex; }
+.bugzarv-diag-info {
+  width: 20px; height: 20px; padding: 0; border-radius: 50%;
+  border: 1px solid #3f3f46; background: transparent; color: #a1a1aa;
+  font-size: 12px; line-height: 1; cursor: pointer;
+}
+.bugzarv-diag-info:hover { color: #e4e4e7; border-color: #52525b; }
+.bugzarv-diag-tip {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 230px;
+  padding: 8px 10px; border-radius: 6px; background: #0f0f11; border: 1px solid #3f3f46;
+  color: #d4d4d8; font-size: 11px; line-height: 1.4; font-weight: 400;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
 .bugzarv-left {
   flex: 1 1 60%; min-width: 0; display: flex; flex-direction: column;
   border-right: 1px solid #27272a; padding: 12px; gap: 8px;
@@ -87,8 +134,10 @@ body { margin: 0; }
   position: absolute; top: -3px; width: 2px; height: 11px; border-radius: 1px;
   transform: translateX(-1px); pointer-events: none;
 }
-.bugzarv-marker-console { background: #f87171; }
-.bugzarv-marker-network { background: #fb923c; }
+/* Non-color cue: console errors are a full tall tick, network failures a shorter
+   tick with a square head — distinguishable without relying on hue (a11y, §C3). */
+.bugzarv-marker-console { background: #f87171; height: 13px; top: -4px; }
+.bugzarv-marker-network { background: #fb923c; height: 7px; top: 0; border-radius: 0; }
 
 .bugzarv-clock {
   flex: 0 0 auto; font-family: ui-monospace, monospace; font-size: 12px; color: #a1a1aa;
@@ -187,7 +236,8 @@ body { margin: 0; }
 
 /* Resources — type filter chips + type tags */
 .bugzarv-respanel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.bugzarv-respanel .bugzarv-rows { flex: 1 1 auto; }
+/* Only the rows scroll; the filter chips stay pinned under the search bar. */
+.bugzarv-respanel .bugzarv-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .bugzarv-rfilter {
   display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; flex: 0 0 auto;
   border-bottom: 1px solid #27272a; background: #1f1f23;
@@ -212,6 +262,29 @@ body { margin: 0; }
 .bugzarv-row-group .bugzarv-row { border-bottom: 0; width: 100%; text-align: left; background: transparent; }
 .bugzarv-disclosure { color: #71717a; flex: 0 0 auto; width: 12px; }
 .bugzarv-detail { padding: 8px 12px 12px 32px; background: #161618; }
+.bugzarv-detail-copy { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+/* R2 — text badges (kind/CORS); always a text token, never color-only */
+.bugzarv-kind {
+  flex: 0 0 auto; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 4px; background: rgba(251, 146, 60, 0.16); color: #fdba74;
+}
+.bugzarv-detail-meta { font-family: ui-monospace, monospace; font-size: 12px; color: #a1a1aa; margin: 6px 0; word-break: break-all; }
+
+/* A2 — reproduction steps */
+.bugzarv-repro { list-style: none; margin: 0; padding: 8px 4px; counter-reset: none; }
+.bugzarv-repro-step { border-bottom: 1px solid #1f1f23; }
+.bugzarv-repro-btn {
+  display: flex; gap: 10px; align-items: flex-start; width: 100%; box-sizing: border-box;
+  padding: 8px 12px; border: 0; background: transparent; color: #e4e4e7; cursor: pointer;
+  font: inherit; text-align: left;
+}
+.bugzarv-repro-btn:hover { background: #27272a; }
+.bugzarv-repro-num {
+  flex: 0 0 auto; min-width: 20px; height: 20px; border-radius: 10px; background: #3f3f46;
+  color: #e4e4e7; font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
+}
+.bugzarv-repro-text { min-width: 0; line-height: 1.5; word-break: break-word; }
+.bugzarv-repro-step:last-child .bugzarv-repro-num { background: #f87171; color: #18181b; }
 .bugzarv-detail-section { margin-bottom: 12px; }
 .bugzarv-detail-section:last-child { margin-bottom: 0; }
 .bugzarv-detail-title {

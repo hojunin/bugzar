@@ -1,5 +1,9 @@
 import type { NetworkEntryPayload } from '@bugzar/shared';
 import { type ReactNode, useState } from 'react';
+import { formatRequestForAI } from '../report/ai-context';
+import { isFailedRequest } from '../report/diagnostics';
+import type { ReportData } from '../report/types';
+import { CopyForAiButton } from '../ui/CopyForAiButton';
 import { JsonTree, maybeJson } from '../ui/JsonTree';
 import { matchesQuery } from './filters';
 import { isThirdParty } from './third-party';
@@ -12,6 +16,8 @@ export interface NetworkPanelProps {
   onSeek: (tFromStart: number) => void;
   /** Include third-party (datadog/amplitude/…) requests. Default false (hidden). */
   includeThirdParty?: boolean;
+  /** Full report — enables per-request "Copy for AI" on failures (B2). */
+  report?: ReportData;
 }
 
 const fmtDur = (ms: number | null) => (ms != null ? `${Math.round(ms)} ms` : '—');
@@ -69,10 +75,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Detail({ e }: { e: NetworkEntryPayload }) {
+function Detail({ e, report }: { e: NetworkEntryPayload; report?: ReportData }) {
   const tag = statusTag(e.status, e.error);
   return (
     <div className="bugzarv-detail">
+      {report && isFailedRequest(e) ? (
+        <div className="bugzarv-detail-copy">
+          <CopyForAiButton getText={() => formatRequestForAI(e, report)} />
+        </div>
+      ) : null}
       <Section title="General">
         <table className="bugzarv-kv">
           <tbody>
@@ -131,6 +142,7 @@ export function NetworkPanel({
   currentTime,
   onSeek,
   includeThirdParty = false,
+  report,
 }: NetworkPanelProps) {
   // Keyed by ORIGINAL entry index — (tFromStart,method,url) can collide, so a
   // content key would dup and break reconciliation when the search/3rd-party
@@ -186,9 +198,14 @@ export function NetworkPanel({
               </span>
               <span className="bugzarv-msg">{e.url}</span>
               <span className={`bugzarv-tag ${tag.cls}`}>{tag.label}</span>
+              {e.corsLikely ? (
+                <span className="bugzarv-kind" title="likely CORS">
+                  CORS?
+                </span>
+              ) : null}
               <span className="bugzarv-time">{fmtDur(e.durationMs)}</span>
             </button>
-            {isOpen ? <Detail e={e} /> : null}
+            {isOpen ? <Detail e={e} {...(report ? { report } : {})} /> : null}
           </div>
         );
       })}

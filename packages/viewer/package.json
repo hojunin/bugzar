@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "eval:ai": "node scripts/eval-ai.mjs"
   },
   "dependencies": {
     "@bugzar/shared": "workspace:*",

@@ -10,7 +10,6 @@ import { reportMode } from './report/mode';
 import { isParamsError, parseReportParams } from './report/params';
 import type { ReportLoad } from './report/types';
 import { SessionView } from './SessionView';
-import { MetaHeader } from './ui/MetaHeader';
 import { LoadError, Loading, NeedParams, VersionMismatch } from './ui/states';
 
 export interface AppProps {
@@ -63,16 +62,24 @@ export function App({ search, inlineLoad }: AppProps = {}) {
 
   return (
     <div className="bugzarv-app">
-      <MetaHeader meta={load.data.meta} />
       {reportMode(load.data) === 'design' ? (
-        <DesignView
-          elements={load.data.design}
-          events={load.data.events}
-          system={load.data.system}
-          meta={load.data.meta}
-          vitals={load.data.vitals}
-          {...(load.data.meta?.url ? { pageUrl: load.data.meta.url } : {})}
-        />
+        <>
+          {/* Design reports have no diagnostic bar — show just the captured URL
+              (the one fact worth a header); resolution/env live in System Info. */}
+          {load.data.meta?.url ? (
+            <header className="bugzarv-urlbar" title={load.data.meta.url}>
+              {load.data.meta.url}
+            </header>
+          ) : null}
+          <DesignView
+            elements={load.data.design}
+            events={load.data.events}
+            system={load.data.system}
+            meta={load.data.meta}
+            vitals={load.data.vitals}
+            {...(load.data.meta?.url ? { pageUrl: load.data.meta.url } : {})}
+          />
+        </>
       ) : (
         <SessionView data={load.data} />
       )}

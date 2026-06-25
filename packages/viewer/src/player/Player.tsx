@@ -65,8 +65,11 @@ export function Player({
     const apply = () => {
       const wrapper = root.querySelector('.replayer-wrapper') as HTMLElement | null;
       if (!wrapper) return;
-      const rw = wrapper.offsetWidth || viewport.width;
-      const rh = wrapper.offsetHeight || viewport.height;
+      // Scale from the RECORDED viewport (rrweb renders the iframe at this size),
+      // NOT wrapper.offsetWidth: the wrapper can get constrained to our own mount
+      // box, which yields scale=1 and clips a wider page on the right.
+      const rw = viewport.width || wrapper.offsetWidth || 1280;
+      const rh = viewport.height || wrapper.offsetHeight || 720;
       const scale = (scroll.clientWidth / rw) * zoom;
       wrapper.style.transformOrigin = 'top left';
       wrapper.style.transform = `scale(${scale})`;

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "network-5xx-order",
+    "bugClass": "network",
+    "expected": {
+      "area": "order API handler / stock check",
+      "fix": "handle OUT_OF_STOCK: surface a user-facing message instead of a 500; validate stock before charging"
+    }
+  },
+  {
+    "name": "runtime-null-deref",
+    "bugClass": "runtime",
+    "expected": {
+      "area": "UserBadge.tsx:14 — user may be undefined",
+      "fix": "guard user before reading user.name (optional chaining / loading state)"
+    }
+  },
+  {
+    "name": "state-dependent-filter",
+    "bugClass": "state",
+    "expected": {
+      "area": "FilterList.tsx:28 — filters is null in state",
+      "fix": "default filters to [] / handle null before .map; check why state.filters is null"
+    }
+  },
+  {
+    "name": "cors-blocked",
+    "bugClass": "cors",
+    "expected": {
+      "area": "CORS config on api.thirdparty.com / proxy the request",
+      "fix": "add the origin to Access-Control-Allow-Origin server-side, or proxy via same-origin endpoint"
+    }
+  },
+  {
+    "name": "runtime-minified-stack",
+    "bugClass": "runtime",
+    "expected": {
+      "area": "cart total component (minified as app.4f3a.js:1:88421 — needs source maps)",
+      "fix": "guard the null cart before reading .total"
+    }
+  },
+  {
+    "name": "async-unhandled-rejection",
+    "bugClass": "async",
+    "expected": {
+      "area": "PayButton.tsx:41 — unawaited/uncaught pay() rejection on timeout",
+      "fix": "await + try/catch the pay() call; show retry on timeout instead of leaving it unhandled"
+    }
+  }
+]

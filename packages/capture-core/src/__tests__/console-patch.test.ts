@@ -6,10 +6,11 @@
  * pin the contract that every patched method actually emits an entry.
  */
 
+import type { ConsoleEntry } from '@bugzar/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installConsolePatch, uninstallConsolePatch } from '../console-patch';
 
-let entries: Array<{ level: string; args: string[] }>;
+let entries: ConsoleEntry[];
 const originalConsole: Record<string, unknown> = {};
 
 beforeEach(() => {
@@ -30,7 +31,7 @@ beforeEach(() => {
   }
   installConsolePatch({
     sessionStart: Date.now(),
-    onEntry: (e) => entries.push({ level: e.level, args: e.args }),
+    onEntry: (e) => entries.push(e),
   });
 });
 
@@ -69,6 +70,59 @@ describe('console-patch — secret redaction', () => {
   });
 });
 
+describe('console-patch — R2b/R2c location signals', () => {
+  const fireError = (over: Record<string, unknown>) => {
+    const ev = new Event('error') as unknown as Record<string, unknown>;
+    Object.assign(ev, over);
+    window.dispatchEvent(ev as unknown as Event);
+  };
+
+  it('captures source(file:line:col), kind=error, and the error.cause chain', () => {
+    fireError({
+      message: 'boom',
+      filename: 'https://app.example/assets/main.js',
+      lineno: 42,
+      colno: 7,
+      error: Object.assign(new Error('boom'), { cause: new Error('root cause here') }),
+    });
+    const e = entries.find((x) => x.args[0] === 'boom');
+    expect(e?.kind).toBe('error');
+    expect(e?.source).toEqual({ file: 'https://app.example/assets/main.js', line: 42, col: 7 });
+    expect(e?.cause).toContain('root cause here');
+  });
+
+  it('redacts a token-shaped value inside error.cause', () => {
+    const JWT =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    fireError({
+      message: 'auth fail',
+      error: Object.assign(new Error('auth fail'), { cause: new Error(`token ${JWT}`) }),
+    });
+    const e = entries.find((x) => x.args[0] === 'auth fail');
+    expect(e?.cause).toBeTruthy();
+    expect(e?.cause).not.toContain(JWT);
+    expect(e?.cause).toContain('[REDACTED]');
+  });
+
+  it('marks unhandledrejection with kind', () => {
+    const ev = new Event('unhandledrejection') as unknown as Record<string, unknown>;
+    ev.reason = new Error('rejected');
+    window.dispatchEvent(ev as unknown as Event);
+    const e = entries.find((x) => x.args[0] === 'rejected');
+    expect(e?.kind).toBe('unhandledrejection');
+  });
+
+  it('captures a CSP violation as kind=csp', () => {
+    const ev = new Event('securitypolicyviolation') as unknown as Record<string, unknown>;
+    ev.violatedDirective = 'script-src';
+    ev.blockedURI = 'https://evil.example/x.js';
+    window.dispatchEvent(ev as unknown as Event);
+    const e = entries.find((x) => x.kind === 'csp');
+    expect(e).toBeTruthy();
+    expect(e?.args.join(' ')).toContain('script-src');
+  });
+});
+
 describe('console-patch — grouping markers', () => {
   // happy-dom's console.group implementation also invokes console.log
   // internally, so calls produce a `group` entry AND a downstream `log`
@@ -77,18 +131,16 @@ describe('console-patch — grouping markers', () => {
 
   it('captures console.group with its label', () => {
     console.group('[API@x] f154ga GET /api/products');
-    expect(entries).toContainEqual({
-      level: 'group',
-      args: ['[API@x] f154ga GET /api/products'],
-    });
+    expect(
+      entries.some((e) => e.level === 'group' && e.args[0] === '[API@x] f154ga GET /api/products'),
+    ).toBe(true);
   });
 
   it('captures console.groupCollapsed distinct from group', () => {
     console.groupCollapsed('start collapsed');
-    expect(entries).toContainEqual({
-      level: 'groupCollapsed',
-      args: ['start collapsed'],
-    });
+    expect(
+      entries.some((e) => e.level === 'groupCollapsed' && e.args[0] === 'start collapsed'),
+    ).toBe(true);
   });
 
   it('captures console.groupEnd', () => {

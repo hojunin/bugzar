@@ -31,6 +31,13 @@ function parseUA(ua: string): { browser: string; os: string } {
   return { browser: browser.trim(), os };
 }
 
+const pad = (n: number): string => String(n).padStart(2, '0');
+/** Local `YYYY-MM-DD HH:MM:SS` — captured-at, moved here from the old header. */
+function formatCapturedAt(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 const fmtOffset = (min: number) => {
   const sign = min <= 0 ? '+' : '-';
   const abs = Math.abs(min);
@@ -135,6 +142,13 @@ export function SystemInfoPanel({
       ]
     : [];
 
+  const startedAt = Number(meta?.startedAt);
+  const durationMs = Number(meta?.durationMs);
+  const session: Array<[string, ReactNode]> = [
+    ['Captured at', Number.isFinite(startedAt) ? formatCapturedAt(startedAt) : ''],
+    ['Duration', Number.isFinite(durationMs) ? `${(durationMs / 1000).toFixed(1)}s` : ''],
+  ];
+
   const page: Array<[string, ReactNode]> = [
     ['URL', system?.page.url || meta?.url],
     ['Title', system?.page.title],
@@ -151,6 +165,7 @@ export function SystemInfoPanel({
           carries.
         </div>
       ) : null}
+      <Section title="Session" rows={session} />
       <Section title="Browser" rows={browser} />
       <Section title="Display" rows={display} />
       <Section title="Network" rows={network} />

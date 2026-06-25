@@ -4,7 +4,7 @@
 
 import type { ReportData } from '../report/types';
 
-export type TabKey = 'console' | 'network' | 'storage' | 'resources' | 'state' | 'system';
+export type TabKey = 'repro' | 'console' | 'network' | 'storage' | 'resources' | 'state' | 'system';
 
 export interface Tab {
   key: TabKey;

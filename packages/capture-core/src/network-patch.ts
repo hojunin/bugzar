@@ -125,6 +125,10 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
       });
       return res;
     } catch (err) {
+      // R2c — an opaque fetch rejection ("Failed to fetch" TypeError, status 0,
+      // no body) is *likely* CORS, but also fires on offline/DNS/adblock — flag
+      // it as a heuristic, never asserted.
+      const corsLikely = err instanceof TypeError;
       onEntry({
         tFromStart,
         method,
@@ -137,6 +141,7 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
         responseBody: null,
         error: err instanceof Error ? err.message : String(err),
         initiator: 'fetch',
+        ...(corsLikely ? { corsLikely: true } : {}),
       });
       throw err;
     }
