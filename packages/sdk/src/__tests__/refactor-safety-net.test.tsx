@@ -87,7 +87,11 @@ const makeFetch = (over: FetchOverrides = {}) =>
     if (method === 'POST' && url.endsWith('/jira/draft')) {
       return (
         over.draft?.() ??
-        json({ title: 'AI title', description: { type: 'doc', version: 1, content: [] }, mode: 'bug' })
+        json({
+          title: 'AI title',
+          description: { type: 'doc', version: 1, content: [] },
+          mode: 'bug',
+        })
       );
     }
     if (method === 'POST' && url.endsWith('/publish')) {

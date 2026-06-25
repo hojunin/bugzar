@@ -148,6 +148,7 @@ export function Controls({
           <div className="bugzarv-track-fill" style={{ width: `${pct}%` }} />
           {markers.map((m, i) => (
             <span
+              // biome-ignore lint/suspicious/noArrayIndexKey: kind+t can collide for coincident events; the index is a uniqueness tiebreaker and the list never reorders.
               key={`${m.kind}-${m.t}-${i}`}
               data-testid="bugzarv-marker"
               className={`bugzarv-marker bugzarv-marker-${m.kind}`}

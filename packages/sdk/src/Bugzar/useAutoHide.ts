@@ -12,13 +12,10 @@ interface UseAutoHideArgs {
 }
 
 /** The autoHide reveal machine: geometric hover + a 2s post-use grace hold. */
-export function useAutoHide({
-  autoHide,
-  mounted,
-  position,
-  inUse,
-  rootRef,
-}: UseAutoHideArgs): { revealed: boolean; collapsed: boolean } {
+export function useAutoHide({ autoHide, mounted, position, inUse, rootRef }: UseAutoHideArgs): {
+  revealed: boolean;
+  collapsed: boolean;
+} {
   // autoHide reveal state: cursor in the hotspot/toolbar, and the 2s post-use hold.
   const [hovering, setHovering] = useState(false);
   const [grace, setGrace] = useState(false);
@@ -30,6 +27,7 @@ export function useAutoHide({
   // page clicks (the dock is pointer-events:none). The hot-zone is the union of
   // a fixed 300×30 corner hotspot (computed from innerWidth/innerHeight — always
   // reliable) and the live toolbar rect (keep-alive while revealed).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rootRef is a stable ref read lazily at pointermove time; its identity never changes, so it is intentionally excluded from deps.
   useEffect(() => {
     if (!autoHide || !mounted) return;
     const inZone = (x: number, y: number): boolean => {

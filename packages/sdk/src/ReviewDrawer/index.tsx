@@ -8,10 +8,10 @@ import { type Endpoint, resolveEndpoint } from '../upload';
 import { ConnectGate } from './ConnectGate';
 import { DrawerForm } from './DrawerForm';
 import { PublishedView } from './PublishedView';
+import { UploadedLink } from './UploadedLink';
 import { useAiPolish } from './useAiPolish';
 import { useEpicSearch } from './useEpicSearch';
 import { usePublish } from './usePublish';
-import { UploadedLink } from './UploadedLink';
 
 type Mode = 'bug' | 'design';
 

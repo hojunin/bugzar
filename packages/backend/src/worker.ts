@@ -420,9 +420,7 @@ const handlePutElementScreenshot = async (
   const key = `reports/${reportId}/elements/${elementId}.png`;
   let payload: ArrayBuffer;
   try {
-    payload = await new Response(
-      capBodyStream(req.body, assetCap('screenshot')),
-    ).arrayBuffer();
+    payload = await new Response(capBodyStream(req.body, assetCap('screenshot'))).arrayBuffer();
   } catch (e) {
     if (e instanceof Error && e.message === ASSET_TOO_LARGE)
       return errorResponse(413, 'asset too large');

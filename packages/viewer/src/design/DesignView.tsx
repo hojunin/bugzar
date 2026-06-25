@@ -265,6 +265,7 @@ export function DesignView({ elements, events, pageUrl, system, meta, vitals }: 
                 return (
                   <button
                     type="button"
+                    // biome-ignore lint/suspicious/noArrayIndexKey: selector+userNote can collide across annotations; the index is a uniqueness tiebreaker and the list never reorders.
                     key={`${el.selector}-${el.userNote}-${i}`}
                     className={`bugzarv-dz-pin${selected === i ? ' bugzarv-dz-pin-on' : ''}`}
                     style={{
@@ -324,6 +325,7 @@ export function DesignView({ elements, events, pageUrl, system, meta, vitals }: 
             </div>
             {elements.map((el, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: selector+userNote can collide across annotations; the index is a uniqueness tiebreaker and the list never reorders.
                 key={`${el.selector}-${el.userNote}-${i}`}
                 className={`bugzarv-dz-item${selected === i ? ' bugzarv-dz-item-on' : ''}`}
               >

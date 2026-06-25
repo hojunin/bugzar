@@ -185,7 +185,11 @@ export function Bugzar({
       // Inline page assets into the snapshot when we'll export an offline HTML.
       // `mask` (maskAllInputs) carries through so the design snapshot masks
       // inputs exactly like the recording path — never cleartext credentials.
-      snapshot = captureSnapshot('.bugzar-root, .bugzar-pick-root', wantsHtml, mask) as RrwebEvent[];
+      snapshot = captureSnapshot(
+        '.bugzar-root, .bugzar-pick-root',
+        wantsHtml,
+        mask,
+      ) as RrwebEvent[];
     } catch {
       snapshot = [];
     }

@@ -88,7 +88,12 @@ export function Toolbar({
         </output>
       ) : (
         <>
-          <button type="button" className="bugzar-fab" onClick={onStart} aria-label={t.startRecording}>
+          <button
+            type="button"
+            className="bugzar-fab"
+            onClick={onStart}
+            aria-label={t.startRecording}
+          >
             <span className="bugzar-fab-dot" />
             <span className="bugzar-fab-label">{t.record}</span>
           </button>
