@@ -98,6 +98,7 @@ export function DrawerForm({
       <EpicCombobox epic={epic} />
 
       {ai.error && <output className="bugzar-ai-error">{t.aiUnavailable}</output>}
+      {ai.stubbed && !ai.error && <output className="bugzar-ai-note">{t.aiStubbed}</output>}
 
       <div className="bugzar-drawer-actions">
         <button

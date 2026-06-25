@@ -28,7 +28,7 @@
 
 import { jsonToBugAdf, jsonToDesignAdf, type SelectedElementLite } from './adf';
 import type { DesignElementInput, DraftInputArtifacts } from './jira-draft';
-import { generateBugDraft, generateDesignDraft, sniffAttachments } from './jira-draft';
+import { buildBugStub, buildDesignStub, generateBugDraft, generateDesignDraft } from './jira-draft';
 import { RRWEB_PLAYER_CSS, RRWEB_PLAYER_JS } from './rrweb-player-asset.generated';
 
 export interface Env {
@@ -1314,69 +1314,20 @@ const handleLegacyArtifactsGet = async (url: URL, env: Env): Promise<Response> =
 // Jira draft (Workers AI)
 // ────────────────────────────────────────────────────────────────────────
 
-/**
- * Build a minimal but useful bug-draft skeleton from the captured artifacts
- * without involving the AI. Two callers:
- *   - `!env.AI`: AI binding missing in this deployment.
- *   - AI generation throws / times out / returns non-JSON: graceful
- *     fallback so the report still publishes to Jira. The caller flags
- *     `stub: true` so the chain records a warning instead of failing.
- *
- * Content rule: fill the FORM with defaults derived from the data we
- * already have (userInput, meta, sniffed attachments). The reviewer can
- * polish in Jira after publish. No fabrication.
- */
-const buildBugStubDraft = (args: {
-  userInput: string;
-  meta: unknown;
-  artifacts?: DraftInputArtifacts;
-}): {
-  title: string;
-  overview: string;
-  reproSteps: string[];
-  envBullets: string[];
-  attachments: { consoleError: string | null; failedRequest: string | null };
-} => {
-  const { userInput, meta, artifacts } = args;
-  const title = userInput.trim().slice(0, 50) || 'Bugzar bug';
-  const overview =
-    userInput.trim() || '(사용자 한 줄 설명 없음 — Replay 영상에서 재현 절차를 확인하세요.)';
-  const envBullets: string[] = [];
-  const m = (meta && typeof meta === 'object' ? meta : {}) as Record<string, unknown>;
-  if (typeof m.url === 'string') envBullets.push(`URL: ${m.url}`);
-  if (m.viewport && typeof m.viewport === 'object') {
-    envBullets.push(`Viewport: ${JSON.stringify(m.viewport)}`);
-  }
-  if (typeof m.userAgent === 'string') envBullets.push(`User-Agent: ${m.userAgent.slice(0, 140)}`);
-  if (typeof m.startedAt === 'number') {
-    envBullets.push(`발생 시각: ${new Date(m.startedAt).toISOString()}`);
-  }
-  if (typeof m.durationMs === 'number') envBullets.push(`지속 시간: ${m.durationMs}ms`);
-  const sniff = artifacts
-    ? sniffAttachments(artifacts)
-    : { consoleError: null, failedRequest: null };
-  return {
-    title,
-    overview,
-    reproSteps: ['(AI 자동 생성 실패 — Replay 영상에서 직접 재현 절차를 확인 후 보완 필요)'],
-    envBullets,
-    attachments: sniff,
-  };
-};
+// Stub fallback (AI binding missing / generation fails) is the deterministic
+// draft built in jira-draft.ts (`buildBugStub` / `buildDesignStub`) — it
+// synthesizes real repro steps from the curated timeline, not a placeholder.
 
 const handleBugDraft = async (
   env: Env,
   input: { artifacts: DraftInputArtifacts; userInput: string; replayUrl: string },
 ): Promise<Response> => {
   const { artifacts, userInput, replayUrl } = input;
-  const meta = (
-    artifacts.meta && typeof artifacts.meta === 'object' ? artifacts.meta : {}
-  ) as Record<string, unknown>;
 
   // AI binding entirely absent (dev / unconfigured deployment) — stub.
   if (!env.AI) {
     console.warn('[jira:draft:bug] AI binding missing — returning stub');
-    const stub = buildBugStubDraft({ userInput, meta, artifacts });
+    const stub = buildBugStub(artifacts, userInput);
     return jsonResponse(200, {
       title: stub.title,
       description: jsonToBugAdf(stub, replayUrl),
@@ -1403,7 +1354,7 @@ const handleBugDraft = async (
       '[jira:draft:bug] AI generation failed, falling back to stub:',
       (err as Error).message,
     );
-    const stub = buildBugStubDraft({ userInput, meta, artifacts });
+    const stub = buildBugStub(artifacts, userInput);
     return jsonResponse(200, {
       title: stub.title,
       description: jsonToBugAdf(stub, replayUrl),
@@ -1411,46 +1362,6 @@ const handleBugDraft = async (
       stub: true,
     });
   }
-};
-
-/**
- * Same pattern as buildBugStubDraft: fill the design-mode form with
- * defaults from user input + selected elements + meta. Used both when the
- * AI binding is absent and when AI generation throws.
- */
-const buildDesignStubDraft = (args: {
-  userInput: string;
-  meta: Record<string, unknown>;
-  elements: DesignElementInput[];
-}): {
-  title: string;
-  overview: string;
-  items: Array<{
-    selector: string;
-    location: string;
-    issue: string;
-    suggestion: string;
-    severityHint: 'minor';
-  }>;
-  envBullets: string[];
-} => {
-  const { userInput, meta, elements } = args;
-  return {
-    title: `[디자인] ${userInput.slice(0, 50) || '(no title)'}`,
-    overview:
-      userInput.trim() || '(사용자 한 줄 설명 없음 — 각 요소의 메모와 Replay 영상을 참고하세요.)',
-    items: elements.map((el) => ({
-      selector: el.selector,
-      location: el.componentName ?? el.selector,
-      issue: el.userNote || '(메모 없음)',
-      suggestion: '(AI 자동 생성 실패 — 직접 보완 필요)',
-      severityHint: 'minor' as const,
-    })),
-    envBullets: [
-      `URL: ${typeof meta.url === 'string' ? meta.url : '(unknown)'}`,
-      `Viewport: ${meta.viewport ? JSON.stringify(meta.viewport) : '(unknown)'}`,
-    ],
-  };
 };
 
 const handleDesignDraft = async (
@@ -1470,7 +1381,7 @@ const handleDesignDraft = async (
 
   if (!env.AI) {
     console.warn('[jira:draft:design] AI binding missing — returning stub');
-    const stub = buildDesignStubDraft({ userInput, meta, elements });
+    const stub = buildDesignStub(elements, userInput, meta);
     return jsonResponse(200, {
       title: stub.title,
       description: jsonToDesignAdf(stub, replayUrl, elementsLite),
@@ -1498,7 +1409,7 @@ const handleDesignDraft = async (
       '[jira:draft:design] AI generation failed, falling back to stub:',
       (err as Error).message,
     );
-    const stub = buildDesignStubDraft({ userInput, meta, elements });
+    const stub = buildDesignStub(elements, userInput, meta);
     return jsonResponse(200, {
       title: stub.title,
       description: jsonToDesignAdf(stub, replayUrl, elementsLite),

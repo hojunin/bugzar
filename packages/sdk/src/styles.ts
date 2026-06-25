@@ -164,6 +164,7 @@ const CSS = `
 }
 .bugzar-card-note { flex: 1; min-width: 0; font-size: 13px; }
 .bugzar-ai-error { font-size: 12px; color: var(--bugzar-error); }
+.bugzar-ai-note { font-size: 12px; opacity: 0.75; }
 .bugzar-drawer-actions { display: flex; align-items: center; gap: 8px; }
 .bugzar-spacer { flex: 1; }
 .bugzar-btn {

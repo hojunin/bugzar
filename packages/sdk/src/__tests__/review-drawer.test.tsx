@@ -179,6 +179,30 @@ describe('M4 review drawer — open + upload', () => {
   });
 });
 
+describe('AI draft — stub notice (limit/error transparency)', () => {
+  it('surfaces the "basic draft" notice when the Worker returns stub:true', async () => {
+    const fetchMock = makeFetch({
+      draft: () => json({ title: 'AI title', description: AI_DRAFT_ADF, mode: 'bug', stub: true }),
+    });
+    renderJira({}, fetchMock);
+    startThenStop();
+    await screen.findByRole('button', { name: 'Publish' });
+    fireEvent.click(screen.getByLabelText('AI polish'));
+    await waitFor(() => expect(screen.getByText(/basic draft/i)).toBeTruthy());
+  });
+
+  it('shows no notice when the AI draft is real (stub:false)', async () => {
+    renderJira();
+    startThenStop();
+    await screen.findByRole('button', { name: 'Publish' });
+    fireEvent.click(screen.getByLabelText('AI polish'));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('AI title'),
+    );
+    expect(screen.queryByText(/basic draft/i)).toBeNull();
+  });
+});
+
 describe('M4 review drawer — fields + publish', () => {
   it('disables Publish until a title is entered', async () => {
     renderJira();

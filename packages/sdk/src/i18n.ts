@@ -66,6 +66,7 @@ export interface Strings {
   aiPolishing: string;
   aiPolishAria: string;
   aiUnavailable: string;
+  aiStubbed: string;
   publish: string;
   publishFailed: string;
   close: string;
@@ -128,6 +129,8 @@ const EN: Strings = {
   aiPolishing: 'AI is Polishing…',
   aiPolishAria: 'AI polish',
   aiUnavailable: 'AI polish is unavailable right now — edit the fields and publish manually.',
+  aiStubbed:
+    'AI was skipped — this is a basic draft (daily limit reached or AI error). Review before publishing.',
   publish: 'Publish',
   publishFailed: 'Publish failed — try again.',
   close: 'Close',
@@ -192,6 +195,7 @@ const KO: Strings = {
   aiPolishing: 'AI가 다듬는 중…',
   aiPolishAria: 'AI 다듬기',
   aiUnavailable: 'AI 다듬기를 지금은 쓸 수 없어요 — 직접 입력하고 발행하세요.',
+  aiStubbed: 'AI 미적용 — 기본 초안입니다 (한도 소진 또는 AI 오류). 발행 전 검토하세요.',
   publish: '발행',
   publishFailed: '발행 실패 — 다시 시도하세요.',
   close: '닫기',

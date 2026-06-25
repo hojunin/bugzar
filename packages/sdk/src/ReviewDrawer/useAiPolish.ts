@@ -22,6 +22,8 @@ interface UseAiPolishArgs {
 export interface AiPolish {
   busy: boolean;
   error: boolean;
+  /** True when the Worker returned a deterministic stub (AI skipped — limit/error). */
+  stubbed: boolean;
   polish: () => Promise<void>;
   /** The rich ADF the AI produced — but only while `description` is unedited. */
   getDescAdf: (description: string) => unknown;
@@ -42,11 +44,13 @@ export function useAiPolish({
 }: UseAiPolishArgs): AiPolish {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [stubbed, setStubbed] = useState(false);
   const adfRef = useRef<unknown>(null);
   const textRef = useRef('');
 
   const polish = useCallback(async () => {
     setError(false);
+    setStubbed(false);
     setBusy(true);
     const userInput = [title, description]
       .map((s) => s.trim())
@@ -97,12 +101,14 @@ export function useAiPolish({
       const data = (await res.json()) as {
         title?: string;
         description?: unknown;
+        stub?: boolean;
       };
       const text = adfToText(data.description);
       if (data.title) setTitle(data.title);
       setDescription(text);
       adfRef.current = data.description ?? null;
       textRef.current = text;
+      setStubbed(data.stub === true);
     } catch {
       setError(true);
     } finally {
@@ -116,5 +122,5 @@ export function useAiPolish({
     [],
   );
 
-  return { busy, error, polish, getDescAdf };
+  return { busy, error, stubbed, polish, getDescAdf };
 }

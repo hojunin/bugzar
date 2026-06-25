@@ -172,14 +172,16 @@ export interface DraftInputArtifacts {
   storage?: unknown;
 }
 
-const MAX_ITEMS = 3;
+// Symptom-list caps (failed requests / console errors shown in [증상]).
+const MAX_ITEMS = 5;
 const MAX_STR = 400;
-// User-action timeline cap. Bigger than `MAX_ITEMS` because the trace
-// is the most important signal — without enough interactions the AI
-// can't infer reproSteps and ends up parroting the user's one-line
-// description. We trim down by deduping consecutive duplicates instead
-// of slicing aggressively at the source.
-const MAX_INTERACTIONS = 20;
+// Repro-path window: how many user actions to keep LEADING UP TO the first
+// failure. We don't slice from the start (the tail — where the bug fires —
+// is what matters), we window around the failure. See `buildReproPath`.
+const MAX_REPRO_STEPS = 6;
+// Error-hint extracted from a failed request's response body. Kept short on
+// purpose — the goal is the error code / message, not the whole payload.
+const ERROR_HINT_MAX = 120;
 
 // ── rrweb snapshot decoding ─────────────────────────────────────────
 //
@@ -222,23 +224,19 @@ const collectInnerText = (node: SerializedNode | undefined, budget = 80): string
   return acc;
 };
 
-const buildHint = (
-  tag: string,
-  attrs: Record<string, string | number | boolean | null> | undefined,
-): string => {
-  if (!attrs) return tag;
+// Stable, semantic identity only. Class selectors / raw HTML are noise that
+// burns tokens and misleads the model, so we DROP them — if an element has no
+// data-testid / aria-label / role we fall back to its visible text (handled by
+// `describeTarget`), not a class soup. Returns '' when there is no stable hint.
+const buildHint = (attrs: Record<string, string | number | boolean | null> | undefined): string => {
+  if (!attrs) return '';
   const testId = attrs['data-testid'] ?? attrs['data-test'] ?? attrs['data-cy'];
-  if (typeof testId === 'string' && testId) return `[data-testid="${testId}"]`;
+  if (typeof testId === 'string' && testId) return `data-testid="${testId}"`;
   const aria = attrs['aria-label'];
-  if (typeof aria === 'string' && aria) return `[aria-label="${aria.slice(0, 30)}"]`;
+  if (typeof aria === 'string' && aria) return `aria-label="${aria.slice(0, 30)}"`;
   const role = attrs.role;
-  if (typeof role === 'string' && role) return `[role="${role}"]`;
-  const className = attrs.class ?? attrs.className;
-  if (typeof className === 'string' && className) {
-    const first = className.split(/\s+/).find((c) => c && !c.startsWith('css-'));
-    if (first) return `${tag}.${first}`;
-  }
-  return tag;
+  if (typeof role === 'string' && role) return `role="${role}"`;
+  return '';
 };
 
 const walkSnapshot = (node: SerializedNode | undefined, index: Map<number, ElementInfo>): void => {
@@ -247,7 +245,7 @@ const walkSnapshot = (node: SerializedNode | undefined, index: Map<number, Eleme
     index.set(node.id, {
       tag: node.tagName.toLowerCase(),
       text: collectInnerText(node, 60).trim().replace(/\s+/g, ' '),
-      hint: buildHint(node.tagName.toLowerCase(), node.attributes),
+      hint: buildHint(node.attributes),
     });
   }
   for (const child of node.childNodes ?? []) walkSnapshot(child, index);
@@ -275,28 +273,84 @@ const indexFullSnapshots = (events: unknown[]): Map<number, ElementInfo> => {
  * through verbatim.
  */
 const describeTarget = (node: ElementInfo | undefined): string => {
-  if (!node) return '(unknown element)';
+  if (!node) return '(알 수 없는 요소)';
   const text = node.text ? ` "${node.text}"` : '';
-  const hint = node.hint !== node.tag ? ` — ${node.hint}` : '';
+  const hint = node.hint ? ` — ${node.hint}` : '';
   return `[${node.tag}${text}${hint}]`;
 };
 
-interface TimelineEntry {
-  tFromStart: number;
+/** A click target is worth keeping in the repro path only if we can name it. */
+const hasIdentity = (node: ElementInfo | undefined): boolean =>
+  !!(node && (node.text || node.hint));
+
+// ── error-signal extraction (the high-value, low-noise part) ────────
+//
+// A failed request's response body usually CONTAINS the real error
+// ("OUT_OF_STOCK", "validation failed: email"). We pull the meaningful
+// field out instead of dumping the whole payload (noise + tokens).
+export const extractErrorHint = (body: unknown): string | null => {
+  if (typeof body !== 'string' || !body.trim()) return null;
+  const trimmed = body.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      // Prefer human-readable fields over bare codes.
+      for (const key of ['message', 'error_description', 'detail', 'error', 'title', 'code']) {
+        const v = obj[key];
+        if (typeof v === 'string' && v.trim()) return v.trim().slice(0, ERROR_HINT_MAX);
+        if (v && typeof v === 'object') {
+          const nested = (v as Record<string, unknown>).message;
+          if (typeof nested === 'string' && nested.trim()) {
+            return nested.trim().slice(0, ERROR_HINT_MAX);
+          }
+        }
+      }
+    }
+  } catch {
+    // not JSON — fall through to a plain truncated slice
+  }
+  return trimmed.replace(/\s+/g, ' ').slice(0, ERROR_HINT_MAX);
+};
+
+// First *frame* of a stack trace (not the message), e.g.
+// "Cart.tsx:42:10" — enough to point at the code without the full dump.
+export const topStackFrame = (stack: unknown): string | null => {
+  if (typeof stack !== 'string' || !stack.trim()) return null;
+  const lines = stack
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const frame = lines.find(
+    (l) => /^at\s/.test(l) || /\.(t|j)sx?:\d+/.test(l) || /:\d+:\d+\)?$/.test(l),
+  );
+  return frame ? frame.replace(/^at\s+/, '').slice(0, 100) : null;
+};
+
+/** Shorten a URL/href to path+query, dropping the origin (noise). */
+const shortPath = (href: string): string => {
+  try {
+    const u = new URL(href);
+    return `${u.pathname}${u.search}` || href;
+  } catch {
+    return href;
+  }
+};
+
+// ── repro path (user actions) ───────────────────────────────────────
+
+interface PathStep {
+  t: number;
   text: string;
+  isFailure: boolean;
 }
 
-const buildTimeline = (
-  events: unknown[],
-  consoleArr: unknown[],
-  netArr: unknown[],
-  sessionStart: number,
-): TimelineEntry[] => {
-  const idx = indexFullSnapshots(events);
-  const entries: TimelineEntry[] = [];
+const MASKED_VALUE = /^[*•·\s]+$/;
 
-  // Track URL changes from rrweb meta events (type 4) — gives us "user
-  // navigated from /list to /detail/123" which is a huge repro hint.
+/** Extract identifiable user actions (nav / click / input) as readable steps. */
+const buildActionTimeline = (events: unknown[], sessionStart: number): PathStep[] => {
+  const idx = indexFullSnapshots(events);
+  const steps: PathStep[] = [];
   let lastUrl: string | undefined;
   for (const ev of events) {
     const e = ev as {
@@ -307,41 +361,49 @@ const buildTimeline = (
     if (!e || typeof e.timestamp !== 'number') continue;
     const t = e.timestamp - sessionStart;
 
-    // type 4 = Meta event (carries the page URL at recording-start +
-    // every history navigation).
     if (e.type === 4 && typeof e.data?.href === 'string') {
       if (e.data.href !== lastUrl) {
         if (lastUrl !== undefined) {
-          entries.push({ tFromStart: t, text: `NAVIGATE → ${e.data.href}` });
+          steps.push({ t, text: `${shortPath(e.data.href)} 로 이동`, isFailure: false });
         }
         lastUrl = e.data.href;
       }
       continue;
     }
-
     if (e.type !== 3) continue;
     const source = e.data?.source;
-    // source 2 = mouse interaction. data.type 2 inside is a click.
     if (source === 2 && e.data?.type === 2 && typeof e.data?.id === 'number') {
-      const target = describeTarget(idx.get(e.data.id));
-      entries.push({ tFromStart: t, text: `CLICK ${target}` });
+      const node = idx.get(e.data.id);
+      // Drop clicks on anonymous containers — they're noise without identity.
+      if (!hasIdentity(node)) continue;
+      steps.push({ t, text: `${describeTarget(node)} 클릭`, isFailure: false });
     } else if (source === 5 && typeof e.data?.id === 'number') {
-      // source 5 = input. data.text is the new value (after rrweb's
-      // masking — strict-masked sessions hand us `*` characters).
-      const target = describeTarget(idx.get(e.data.id));
-      const value = typeof e.data?.text === 'string' ? e.data.text.slice(0, 40) : '';
-      entries.push({
-        tFromStart: t,
-        text: `INPUT ${target}${value ? ` value="${value}"` : ''}`,
-      });
+      const node = idx.get(e.data.id);
+      const raw = typeof e.data?.text === 'string' ? e.data.text.slice(0, 40) : '';
+      const value = raw && MASKED_VALUE.test(raw) ? '(입력값 마스킹됨)' : raw;
+      const valuePart = value
+        ? value === '(입력값 마스킹됨)'
+          ? ` 에 ${value} 입력`
+          : ` 에 "${value}" 입력`
+        : ' 입력';
+      steps.push({ t, text: `${describeTarget(node)}${valuePart}`, isFailure: false });
     }
   }
+  return steps;
+};
 
-  // Failed network calls — interleaved into the timeline so the AI can
-  // correlate "clicked filter → request to /graphql returned 0 items"
-  // even though that request was a 200. We include both >=400 AND any
-  // request flagged with a non-empty `error` (network-layer failures,
-  // CORS denials, etc.) so the AI doesn't miss silent breakage.
+// ── failure signals (symptoms) ──────────────────────────────────────
+
+interface FailureSignal {
+  t: number;
+  /** Detailed line for the [증상] block. */
+  symptom: string;
+  /** Compact marker for the repro path tail. */
+  marker: string;
+}
+
+const extractFailures = (netArr: unknown[], consoleArr: unknown[]): FailureSignal[] => {
+  const out: FailureSignal[] = [];
   for (const ev of netArr) {
     const e = ev as {
       tFromStart?: number;
@@ -349,152 +411,161 @@ const buildTimeline = (
       url?: string;
       status?: number | null;
       error?: string | null;
+      responseBody?: string | null;
     } | null;
     if (!e || typeof e.tFromStart !== 'number') continue;
     const isFail = (typeof e.status === 'number' && e.status >= 400) || !!e.error;
     if (!isFail) continue;
-    entries.push({
-      tFromStart: e.tFromStart,
-      text: `NETWORK ${e.method ?? 'GET'} ${e.url ?? '?'} → ${e.status ?? 'ERR'}${e.error ? ` (${e.error})` : ''}`.slice(
+    const method = e.method ?? 'GET';
+    const url = e.url ?? '?';
+    const status = e.status ?? 'ERR';
+    const hint = extractErrorHint(e.responseBody) ?? (e.error ? String(e.error) : null);
+    out.push({
+      t: e.tFromStart,
+      symptom: `실패 요청: ${method} ${url} → ${status}${hint ? ` | ${hint}` : ''}`.slice(
         0,
         MAX_STR,
       ),
+      marker: `✗ ${method} ${url} 요청이 ${status} 으로 실패`,
     });
   }
-
-  // Console errors with their position in time — so the AI can say
-  // "the error fires AFTER the click" instead of just attaching it.
   for (const ev of consoleArr) {
-    const e = ev as { tFromStart?: number; level?: string; args?: unknown[] } | null;
-    if (!e || typeof e.tFromStart !== 'number') continue;
-    if (e.level !== 'error') continue;
-    const text = (e.args ?? [])
+    const e = ev as {
+      tFromStart?: number;
+      level?: string;
+      args?: unknown[];
+      stack?: string;
+    } | null;
+    if (!e || typeof e.tFromStart !== 'number' || e.level !== 'error') continue;
+    const msg = (e.args ?? [])
       .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
       .join(' ')
       .slice(0, MAX_STR);
-    entries.push({ tFromStart: e.tFromStart, text: `CONSOLE.ERROR ${text}` });
+    const frame = topStackFrame(e.stack);
+    out.push({
+      t: e.tFromStart,
+      symptom: `콘솔 에러: ${msg}${frame ? ` @ ${frame}` : ''}`,
+      marker: `✗ 콘솔 에러: ${msg.slice(0, 80)}`,
+    });
   }
-
-  entries.sort((a, b) => a.tFromStart - b.tFromStart);
-  // Drop consecutive duplicates (rrweb fires mousedown/mouseup/click in
-  // a row for the same target — collapse into a single CLICK in the
-  // narrative).
-  const deduped: TimelineEntry[] = [];
-  for (const entry of entries) {
-    const last = deduped[deduped.length - 1];
-    if (last && last.text === entry.text && entry.tFromStart - last.tFromStart < 500) continue;
-    deduped.push(entry);
-  }
-  return deduped.slice(0, MAX_INTERACTIONS);
-};
-
-const formatTimeline = (entries: TimelineEntry[]): string => {
-  if (entries.length === 0) return '(상호작용 없음)';
-  return entries.map((e) => `    [+${(e.tFromStart / 1000).toFixed(1)}s] ${e.text}`).join('\n');
+  return out;
 };
 
 /**
- * Pull human-readable nuggets out of the noisy raw arrays. The model
- * gets a structured timeline of user actions + URL changes + failed
- * requests + console errors so it can write actual reproduction steps,
- * not just parrot the user's one-line description.
+ * Merge user actions + failure markers, then KEEP THE WINDOW AROUND THE
+ * FIRST FAILURE (the tail is where the bug fires). No failure → first N.
+ * Consecutive duplicates within 500ms are collapsed (mousedown/up noise).
+ */
+const buildReproPath = (actions: PathStep[], failures: FailureSignal[]): PathStep[] => {
+  const failSteps: PathStep[] = failures.map((f) => ({ t: f.t, text: f.marker, isFailure: true }));
+  const all = [...actions, ...failSteps].sort((a, b) => a.t - b.t);
+  const deduped: PathStep[] = [];
+  for (const step of all) {
+    const last = deduped[deduped.length - 1];
+    if (last && last.text === step.text && step.t - last.t < 500) continue;
+    deduped.push(step);
+  }
+  const firstFail = deduped.findIndex((s) => s.isFailure);
+  if (firstFail === -1) return deduped.slice(0, MAX_REPRO_STEPS);
+  const start = Math.max(0, firstFail - (MAX_REPRO_STEPS - 1));
+  return deduped.slice(start, firstFail + 1);
+};
+
+/** Numbered Korean repro steps — shared by the prompt and the deterministic stub. */
+export const timelineToReproSteps = (steps: PathStep[]): string[] =>
+  steps.map((s, i) => `${i + 1}. ${s.text}`);
+
+/** Pull just the URL + start time from meta (env block — no UA/viewport noise). */
+const envFromMeta = (meta: Record<string, unknown>): { url: string; startedAt: string } => ({
+  url: typeof meta.url === 'string' ? meta.url : '(unknown)',
+  startedAt: typeof meta.startedAt === 'number' ? new Date(meta.startedAt).toISOString() : '(?)',
+});
+
+/**
+ * Curated, symptom-first summary fed to the model. Three blocks:
+ *   [증상]      — failed requests (with response-body error hint) + console errors (with top frame)
+ *   [재현 경로]  — identifiable user actions windowed around the first failure
+ *   [환경]      — URL + start time only
+ * Everything else (class selectors, UA, viewport, success requests, non-error
+ * console, full stacks) is dropped — noise that burns tokens and misleads.
  */
 export const summarizeForPrompt = (input: DraftInputArtifacts): string => {
   const meta = (input.meta ?? {}) as Record<string, unknown>;
-  const url = typeof meta.url === 'string' ? meta.url : '(unknown)';
-  const userAgent = typeof meta.userAgent === 'string' ? (meta.userAgent as string) : '(unknown)';
-  const viewport =
-    meta.viewport && typeof meta.viewport === 'object'
-      ? JSON.stringify(meta.viewport)
-      : '(unknown)';
-  const startedAt =
-    typeof meta.startedAt === 'number' ? new Date(meta.startedAt).toISOString() : '(?)';
-  const endedAt = typeof meta.endedAt === 'number' ? new Date(meta.endedAt).toISOString() : '(?)';
   const sessionStart = typeof meta.startedAt === 'number' ? (meta.startedAt as number) : 0;
-  const durationMs =
-    typeof meta.endedAt === 'number' && typeof meta.startedAt === 'number'
-      ? (meta.endedAt as number) - sessionStart
-      : null;
-
   const consoleArr = Array.isArray(input.console) ? (input.console as unknown[]) : [];
-  const errors = consoleArr
-    .filter((e) => {
-      const ev = e as { level?: string } | null;
-      return ev?.level === 'error';
-    })
-    .slice(0, MAX_ITEMS)
-    .map((e) => {
-      const ev = e as { args?: unknown[] };
-      const text = (ev.args ?? [])
-        .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
-        .join(' ');
-      return text.slice(0, MAX_STR);
-    });
-
   const netArr = Array.isArray(input.network) ? (input.network as unknown[]) : [];
-  const failed = netArr
-    .filter((e) => {
-      const ev = e as { status?: number; error?: string | null } | null;
-      return (
-        (typeof ev?.status === 'number' && ev.status >= 400) ||
-        !!(ev?.error as string | null | undefined)
-      );
-    })
-    .slice(0, MAX_ITEMS)
-    .map((e) => {
-      const ev = e as { method?: string; url?: string; status?: number; error?: string | null };
-      return `${ev.method ?? 'GET'} ${ev.url ?? '?'} → ${ev.status ?? 'ERR'}${ev.error ? ` (${ev.error})` : ''}`.slice(
-        0,
-        MAX_STR,
-      );
-    });
-
   const eventsArr = Array.isArray(input.events) ? (input.events as unknown[]) : [];
-  const timeline = buildTimeline(eventsArr, consoleArr, netArr, sessionStart);
 
-  const lines: string[] = [
-    `- URL: ${url}`,
-    `- 시간: ${startedAt} ~ ${endedAt}${durationMs !== null ? ` (지속 ${durationMs}ms)` : ''}`,
-    `- Viewport: ${viewport}`,
-    `- User-Agent: ${userAgent.slice(0, 160)}`,
-    `- console errors (${errors.length}건${errors.length === 0 ? ', 없음' : ''})${errors.length ? ':' : ''}`,
-    ...errors.map((s) => `    · ${s}`),
-    `- failed requests (${failed.length}건${failed.length === 0 ? ', 없음' : ''})${failed.length ? ':' : ''}`,
-    ...failed.map((s) => `    · ${s}`),
-    `- 사용자 행동 타임라인 (시간순, 최대 ${MAX_INTERACTIONS}건):`,
-    formatTimeline(timeline),
-  ];
+  const failures = extractFailures(netArr, consoleArr);
+  const actions = buildActionTimeline(eventsArr, sessionStart);
+  const reproSteps = timelineToReproSteps(buildReproPath(actions, failures));
 
-  return redactJwt(lines.join('\n'));
+  const symptomBlock = failures.length
+    ? failures
+        .slice(0, MAX_ITEMS)
+        .map((f) => `- ${f.symptom}`)
+        .join('\n')
+    : '(명시적 실패 신호 없음)';
+  const reproBlock = reproSteps.length
+    ? reproSteps.map((s) => `  ${s}`).join('\n')
+    : '(상호작용 없음)';
+  const env = envFromMeta(meta);
+
+  const out = [
+    '[증상]',
+    symptomBlock,
+    '',
+    '[재현 경로]',
+    reproBlock,
+    '',
+    '[환경]',
+    `- URL: ${env.url}`,
+    `- 발생 시각: ${env.startedAt}`,
+  ].join('\n');
+
+  return redactJwt(out);
 };
 
-const SYSTEM_PROMPT = `당신은 한국어로 QA 리포트를 작성하는 어시스턴트입니다.
-사용자가 보고한 문제와 캡처된 브라우저 세션 정보(타임라인)를 바탕으로 JSON schema 에 맞춘 응답만 생성하세요.
+const SYSTEM_PROMPT = `당신은 한국어로 QA 버그 리포트를 작성하는 어시스턴트입니다.
+목표: 개발자가 추가 질문 없이 바로 재현·수정에 착수할 수 있는 리포트.
+입력은 (1) 사용자 한 줄 설명 (2) 큐레이션된 [증상]/[재현 경로]/[환경] 요약입니다. JSON schema 에 맞춘 응답만 생성하세요.
+
+판단 순서 (먼저 할 것):
+1) [증상]의 실패 요청·콘솔 에러가 버그의 핵심입니다. title·overview 를 이 증상 중심으로 쓰고, 단순 클릭 나열로 채우지 말 것.
+2) [증상]이 비어 있으면 사용자 입력 + [재현 경로]의 마지막 액션 결과를 증상으로 삼을 것.
 
 각 필드 작성 규칙:
-- title: 한 줄, 50자 이내. "어디서 / 무엇이 / 어떻게" 핵심을 담을 것. 사용자 입력이 짧으면 타임라인의 첫 CLICK 대상 + 결과적 에러로 합성.
-- overview: 1-3 문장. "사용자가 X 화면에서 Y 액션을 했을 때 Z 가 발생/실패함" 구조. 가능하면 타임라인의 NAVIGATE / CONSOLE.ERROR / 실패한 NETWORK 호출과 연결.
-- reproSteps: 한 단계 한 문자열, 3-7 단계 권장. **사용자 입력이 짧을 때는 타임라인의 CLICK / INPUT / NAVIGATE 이벤트에서 직접 합성하세요** ("절차 모르겠음" 같은 자리표시자 금지).
-  타임라인은 [tag "text" — selector] 형식 (대괄호 + dash) 으로 요소를 가리킵니다 — 이 대괄호 표기를 그대로 reproSteps 에 옮겨 적으세요. **angle bracket 형식 (꺾쇠 < > 안에 tag) 으로 바꾸지 말 것** — Jira 가 HTML 태그로 오해해서 첫 글자가 잘려 보일 수 있습니다.
-  예:
-  · "1. https://example.com/page 페이지로 이동"
-  · '2. [button "판매중"] 클릭'
-  · "3. 결과 없음 / 에러 X 발생"
-- envBullets: URL, 발생 시각(UTC 또는 KST), 지속시간을 포함. (Viewport / Browser / User-Agent 는 넣지 말 것.)
-- attachments.consoleError: 첫 error 의 message 그대로(없으면 null).
+- title: 한 줄, 50자 이내, 끝에 마침표 금지, "버그:" 같은 접두어 금지. "어디서 / 무엇이 / 어떻게" 핵심.
+- overview: 1-3 문장. "사용자가 X 화면에서 Y 했을 때 Z 가 발생/실패함" 구조. 가능하면 '기대 vs 실제'를 대비 — 단, 기대 동작을 입력에서 추론할 수 없으면 쓰지 말 것(추측 금지).
+- reproSteps: 한 단계 한 문자열, 3-7 단계. **[재현 경로]의 단계를 그대로 옮겨 적되, 마지막 단계는 관측된 실패/이상 결과로 끝낼 것.** 자리표시자("절차 모르겠음" 등) 금지.
+  요소는 [tag "text"] 대괄호 표기로 주어집니다 — 그대로 옮기세요. **꺾쇠 < > 로 바꾸지 말 것** (Jira 가 HTML 태그로 오해해 첫 글자가 잘림).
+- envBullets: URL, 발생 시각만. (Viewport / Browser / User-Agent 는 넣지 말 것.)
+- attachments.consoleError: 첫 콘솔 에러 message 그대로(없으면 null).
 - attachments.failedRequest: "<METHOD> <URL> → <status>" 형식(없으면 null).
 
+문체: 간결한 평서형('~함 / ~됨')으로 통일.
+
 원칙 (Anti-hallucination — 어기면 부정확한 리포트가 발행됨):
-- **숫자 추정 금지**: "N회 반복", "X자리 비밀번호", "Y번째 시도" 같이 정확한 횟수/길이/순번을 단정하지 말 것. 타임라인에 실제로 등장한 이벤트만 세어서 표기. 모호하면 "여러 번", "반복적으로" 같이 정성 표현 사용.
-- **입력값 추정 금지**: 사용자가 무엇을 입력했는지는 timeline INPUT 이벤트의 따옴표 안 값만 사용. 마스킹된 값 (asterisk 3개 또는 "(masked)") 은 "(입력값 마스킹됨)" 으로 표기하고 자릿수/내용/타입(비밀번호인지 이메일인지 등) 절대 추정 금지.
-- **개요와 reproSteps 정합**: overview 에서 언급한 횟수/이벤트는 반드시 reproSteps 와 일치해야 함. "5번 클릭" 적었으면 reproSteps 에 클릭이 정확히 5번 나와야 함.
-- **입력 type 추정 금지**: input 의 type 속성이 timeline 에 명시되지 않은 한 "비밀번호 입력" / "이메일 입력" 등 단정 금지. tag/selector 만 보고 일반 input 으로 표기.
-- 타임라인이 비어있어도 사용자 입력 + 환경 정보만으로 가능한 한 자세히 작성.
+- **숫자 추정 금지**: 정확한 횟수/길이/순번을 단정하지 말 것. [재현 경로]에 실제로 등장한 것만 세어 표기. 모호하면 "여러 번" 등 정성 표현.
+- **입력값 추정 금지**: 입력값은 [재현 경로]의 따옴표 안 값만 사용. "(입력값 마스킹됨)"은 자릿수/내용/타입 추정 금지.
+- **overview 와 reproSteps 정합**: overview 의 횟수/이벤트는 reproSteps 와 일치.
+- **입력 type 추정 금지**: 명시 없으면 "비밀번호/이메일 입력" 단정 금지.
 - 캡처되지 않아 추측한 내용은 "(추정)" 접미사로 표시.
-- console error 의 raw 텍스트를 reproSteps 에 그대로 복사하지 말 것 — 의미를 풀어서 적기.`;
+- 콘솔 에러 raw 텍스트를 reproSteps 에 그대로 복사하지 말 것 — 의미를 풀어 적기.
+
+예시 (형식·톤 참고용 — 값을 그대로 베끼지 말 것):
+[증상]
+- 실패 요청: POST /graphql → 500 | PRODUCT_FETCH_FAILED
+- 콘솔 에러: Failed to fetch products @ ProductList.tsx:88
+[재현 경로]
+  1. [button "필터 열기" — data-testid="filter-toggle"] 클릭
+  2. [span "판매중"] 클릭
+  3. ✗ POST /graphql 요청이 500 으로 실패
+[이상적 출력]
+{"title":"판매중 필터 적용 시 /graphql 500 으로 상품 목록 빔","overview":"사용자가 목록 화면에서 필터를 열고 '판매중'을 선택했을 때 POST /graphql 이 500(PRODUCT_FETCH_FAILED)으로 실패하며 상품이 표시되지 않음. 기대: 판매중 상품 노출, 실제: 빈 목록.","reproSteps":["1. [button \\"필터 열기\\" — data-testid=\\"filter-toggle\\"] 클릭","2. [span \\"판매중\\"] 클릭","3. POST /graphql 이 500 으로 실패하고 상품 목록이 비어 있음"],"envBullets":["URL: https://example.com/products","발생 시각: 2026-06-23T04:12:00Z"],"attachments":{"consoleError":"Failed to fetch products","failedRequest":"POST /graphql → 500"}}`;
 
 const buildUserPrompt = (userInput: string, summary: string): string =>
-  `사용자 입력:\n"${userInput}"\n\n캡처된 데이터 요약:\n${summary}`;
+  `[사용자 입력]\n"${userInput || '(없음)'}"\n\n${summary}`;
 
 /**
  * Best-effort sniff for the first console error / first failed request that
@@ -529,6 +600,82 @@ export const sniffAttachments = (
     : null;
 
   return { consoleError, failedRequest };
+};
+
+/**
+ * Deterministic draft used when AI is unavailable (no binding / free-tier
+ * exhausted / schema violation). Builds REAL repro steps from the same curated
+ * timeline the prompt uses, so the no-AI path is still publishable — not a
+ * "(AI 실패)" placeholder. On the Free plan this is what reviewers see once the
+ * daily neuron allocation is spent.
+ */
+export const buildBugStub = (artifacts: DraftInputArtifacts, userInput: string): BugDraft => {
+  const safe = sanitizeForAI(artifacts) as DraftInputArtifacts;
+  const meta = (safe.meta && typeof safe.meta === 'object' ? safe.meta : {}) as Record<
+    string,
+    unknown
+  >;
+  const sessionStart = typeof meta.startedAt === 'number' ? (meta.startedAt as number) : 0;
+  const consoleArr = Array.isArray(safe.console) ? (safe.console as unknown[]) : [];
+  const netArr = Array.isArray(safe.network) ? (safe.network as unknown[]) : [];
+  const eventsArr = Array.isArray(safe.events) ? (safe.events as unknown[]) : [];
+
+  const failures = extractFailures(netArr, consoleArr);
+  const actions = buildActionTimeline(eventsArr, sessionStart);
+  const reproSteps = timelineToReproSteps(buildReproPath(actions, failures)).map((s) =>
+    redactJwt(s),
+  );
+  const sniff = sniffAttachments(safe);
+  const env = envFromMeta(meta);
+  const trimmedInput = userInput.trim();
+  const firstSymptom = failures[0]?.symptom ?? null;
+
+  const title = redactJwt(
+    trimmedInput.slice(0, 50) ||
+      (sniff.failedRequest ? `요청 실패: ${sniff.failedRequest}` : '') ||
+      (firstSymptom ? firstSymptom.slice(0, 50) : '') ||
+      'Bugzar 버그 리포트',
+  );
+  const overview = redactJwt(
+    trimmedInput ||
+      (firstSymptom
+        ? `세션 중 ${firstSymptom} 발생 (자동 합성된 기본 초안 — Replay 영상으로 확인 필요).`
+        : '사용자 한 줄 설명이 없어 캡처된 동작만으로 합성한 기본 초안입니다. Replay 영상으로 재현 절차를 확인하세요.'),
+  );
+
+  return {
+    title,
+    overview,
+    reproSteps: reproSteps.length
+      ? reproSteps
+      : ['기록된 상호작용이 없어 재현 절차를 확정하지 못함 — Replay 영상 참고'],
+    envBullets: [`URL: ${env.url}`, `발생 시각: ${env.startedAt}`],
+    attachments: sniff,
+  };
+};
+
+/** Deterministic design draft used when AI is unavailable. Memo-first. */
+export const buildDesignStub = (
+  elements: DesignElementInput[],
+  userInput: string,
+  meta: Record<string, unknown>,
+): DesignDraft => {
+  const env = envFromMeta(meta);
+  return {
+    title: `[디자인] ${userInput.trim().slice(0, 50) || '디자인 피드백'}`,
+    overview: redactJwt(
+      userInput.trim() ||
+        '사용자 전체 코멘트가 없어 각 요소의 메모를 기반으로 정리한 기본 초안입니다.',
+    ),
+    items: elements.map((el) => ({
+      selector: el.selector,
+      location: el.componentName || (el.textContent ?? '').trim().slice(0, 40) || el.selector,
+      issue: redactJwt((el.userNote ?? '').trim() || '(메모 없음 — 요소 기준 검토 필요)'),
+      suggestion: '(검토 필요)',
+      severityHint: 'minor' as const,
+    })),
+    envBullets: [`URL: ${env.url}`, `발생 시각: ${env.startedAt}`],
+  };
 };
 
 const isBugDraft = (v: unknown): v is BugDraft => {
@@ -608,61 +755,53 @@ export interface DesignElementInput {
 const truncate = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 /**
- * Format the per-element block for the design prompt. We keep each row
- * compact — the model only needs selector + tag + textContent + the user's
- * memo to write a sensible issue/suggestion pair.
+ * One compact line per selected element — IDENTITY + the user's memo (the
+ * key signal). We drop the raw css selector and rect/size: the selector is
+ * restored by index on output, and size is noise. Identity = component name
+ * when known, else tag, plus the visible text.
  */
-const summarizeDesignElement = (el: DesignElementInput): string => {
-  const tag = (el.tagName ?? '').toLowerCase();
-  const text = truncate((el.textContent ?? '').trim(), 80);
+const summarizeDesignElement = (el: DesignElementInput, idx: number): string => {
+  const ident = el.componentName
+    ? `<${el.componentName}>`
+    : (el.tagName ?? 'element').toLowerCase();
+  const text = truncate((el.textContent ?? '').trim(), 60);
+  const textPart = text ? ` "${text}"` : '';
   const note = truncate(redactJwt((el.userNote ?? '').trim()), 200);
-  const comp = el.componentName ? ` <${el.componentName}>` : '';
-  const sizeStr = el.rect ? ` (${Math.round(el.rect.width)}×${Math.round(el.rect.height)})` : '';
-  const parts = [
-    `selector: ${el.selector}`,
-    `tag: ${tag}${comp}${sizeStr}`,
-    text ? `text: ${text}` : null,
-    note ? `사용자 메모: ${note}` : 'note: (메모 없음)',
-  ].filter((s): s is string => Boolean(s));
-  return parts.join('\n  ');
+  return `${idx + 1}. ${ident}${textPart} — 메모: ${note || '(없음)'}`;
 };
 
 const summarizeDesignInput = (
   elements: DesignElementInput[],
   meta: Record<string, unknown> | undefined,
 ): string => {
-  const url = typeof meta?.url === 'string' ? meta.url : '(unknown)';
-  const viewport =
-    meta?.viewport && typeof meta.viewport === 'object'
-      ? JSON.stringify(meta.viewport)
-      : '(unknown)';
-  const userAgent = typeof meta?.userAgent === 'string' ? meta.userAgent : '(unknown)';
-  const header = [
-    `- URL: ${url}`,
-    `- Viewport: ${viewport}`,
-    `- UA: ${truncate(userAgent, 200)}`,
-  ].join('\n');
-  const items = elements
-    .map((el, idx) => `[${idx + 1}]\n  ${summarizeDesignElement(el)}`)
-    .join('\n');
-  return `${header}\n\n선택된 요소 (${elements.length}개):\n${items || '(선택 없음)'}`;
+  const env = envFromMeta((meta ?? {}) as Record<string, unknown>);
+  const items = elements.map((el, idx) => summarizeDesignElement(el, idx)).join('\n');
+  return `[선택한 요소]\n${items || '(선택 없음)'}\n\n[환경]\n- URL: ${env.url}\n- 발생 시각: ${env.startedAt}`;
 };
 
 const DESIGN_SYSTEM_PROMPT = `당신은 한국어로 디자인 피드백 리포트를 작성하는 어시스턴트입니다.
-입력으로 사용자가 한 페이지에서 선택한 UI 요소들 + 사용자 코멘트가 주어집니다.
-JSON schema 에 맞춘 응답만 생성하세요.
-- title: "[디자인]" 으로 시작하는 한 줄, 60자 이내.
-- overview: 1~2 문장으로 전체 의도.
-- items: 입력의 각 요소에 대해 한 row. selector 는 입력값을 절대 변형하지 말고 그대로 복사.
-  · location: 사용자에게 보일 위치 설명 ("헤더의 검색 버튼" 등).
-  · issue: 사용자 메모를 다듬은 문장 (메모가 비어 있으면 element 정보로 합리적 추정).
-  · suggestion: 개선 방향을 짧은 한 문장으로.
-  · severityHint: minor | major | critical 중 하나.
-- envBullets: ["URL: ...", "발생 시각: ..."] 형태. (Viewport / Browser 는 넣지 말 것.)
-모든 필드는 한국어로.`;
+입력은 (1) 사용자 전체 코멘트 (2) [선택한 요소] 목록(요소별 식별자 + 사용자 메모) + [환경]. JSON schema 에 맞춘 응답만 생성하세요.
+
+각 필드 작성 규칙:
+- title: "[디자인]"으로 시작, 60자 이내.
+- overview: 1~2 문장으로 피드백의 전체 의도.
+- items: 입력의 각 요소마다 하나, 입력 순서 그대로.
+  · selector: 해당 요소의 번호 문자열(예: "1"). 임의 변형 금지.
+  · location: 사용자에게 보일 위치 ("헤더의 검색 버튼" 등) — 식별자/텍스트로 추론.
+  · issue: 사용자 메모를 자연스러운 한 문장으로 다듬기. 메모가 "(없음)"이면 요소 정보로 합리적 추정하되 "(추정)" 표시.
+  · suggestion: 구체적 개선 방향을 한 문장으로.
+  · severityHint: minor|major|critical. 판단 근거 — 가독성/접근성 저해는 major 이상, 정렬·여백 등 미관 이슈는 minor.
+- envBullets: ["URL: ...", "발생 시각: ..."]. (Viewport / Browser / User-Agent 는 넣지 말 것.)
+문체: 간결한 평서형, 모든 필드 한국어.
+
+예시 (형식 참고 — 값을 그대로 베끼지 말 것):
+[선택한 요소]
+1. <BuyButton> "구매하기" — 메모: 버튼이 작고 색이 흐림
+[이상적 출력]
+{"title":"[디자인] 구매 버튼 가시성 개선 필요","overview":"주요 행동 유도 버튼의 크기와 대비가 부족해 눈에 잘 띄지 않음.","items":[{"selector":"1","location":"구매 버튼","issue":"구매 버튼이 작고 색 대비가 낮아 가독성이 떨어짐.","suggestion":"버튼 크기를 키우고 배경과의 대비를 높여 주요 액션으로 강조.","severityHint":"major"}],"envBullets":["URL: https://example.com/cart","발생 시각: 2026-06-23T04:12:00Z"]}`;
 
 const buildDesignUserPrompt = (userInput: string, summary: string): string =>
-  `사용자 전체 코멘트:\n"${userInput || '(전체 코멘트 없음)'}"\n\n캡처된 디자인 정보:\n${summary}`;
+  `[전체 코멘트]\n"${userInput || '(없음)'}"\n\n${summary}`;
 
 const isDesignDraft = (v: unknown): v is DesignDraft => {
   if (!v || typeof v !== 'object') return false;
@@ -707,6 +846,52 @@ export interface GenerateDesignDraftOptions {
  */
 export const DEFAULT_AI_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
+/** Corrective nudge appended on the single retry after a schema/parse failure. */
+const SCHEMA_CORRECTION =
+  '이전 응답이 JSON schema 를 위반했습니다. 설명·코드펜스·군더더기 없이 schema 에 맞는 JSON 객체 하나만 출력하세요.';
+
+interface RunDraftOptions<T> {
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  schema: unknown;
+  maxTokens: number;
+  label: string;
+  validate: (v: unknown) => v is T;
+}
+
+/**
+ * Call Workers AI with a JSON-schema constraint, salvage + validate the
+ * output, and retry ONCE with a corrective nudge on a parse/schema failure —
+ * the model frequently honors the schema on the second ask. Timeouts are NOT
+ * retried (that would double the wall-clock wait). Throws if both attempts
+ * fail; the caller falls back to the deterministic stub.
+ */
+const runDraftModel = async <T>(ai: Ai, opts: RunDraftOptions<T>): Promise<T> => {
+  const attempt = async (messages: RunDraftOptions<T>['messages']): Promise<T> => {
+    const result = (await withTimeout(
+      ai.run(opts.model, {
+        messages,
+        response_format: { type: 'json_schema', json_schema: opts.schema },
+        max_tokens: opts.maxTokens,
+      } as Parameters<Ai['run']>[1]),
+      AI_TIMEOUT_MS,
+      opts.label,
+    )) as { response?: unknown } | string;
+    const raw =
+      typeof result === 'string' ? result : ((result as { response?: unknown }).response ?? result);
+    const parsed = extractJsonFromAiResponse(raw);
+    if (!opts.validate(parsed)) throw new Error(`${opts.label}: schema violation`);
+    return parsed;
+  };
+
+  try {
+    return await attempt(opts.messages);
+  } catch (err) {
+    if (/timed out/.test((err as Error).message)) throw err;
+    return attempt([...opts.messages, { role: 'user', content: SCHEMA_CORRECTION }]);
+  }
+};
+
 /**
  * Workers AI call for the design mode. Returns `DesignDraft` matching
  * `DESIGN_SCHEMA`. Throws on schema violation — caller (worker.ts)
@@ -725,29 +910,15 @@ export const generateDesignDraft = async (
     { role: 'user', content: buildDesignUserPrompt(redactJwt(opts.userInput), summary) },
   ];
 
-  const result = (await withTimeout(
-    ai.run(opts.model ?? DEFAULT_AI_MODEL, {
-      messages,
-      response_format: {
-        type: 'json_schema',
-        json_schema: DESIGN_SCHEMA,
-      },
-      // Design draft is more verbose (one block per element). Bump the
-      // ceiling so an 8-element pick doesn't get truncated.
-      max_tokens: 1536,
-    } as Parameters<Ai['run']>[1]),
-    AI_TIMEOUT_MS,
-    'Workers AI (design)',
-  )) as { response?: unknown } | string;
-
-  const raw =
-    typeof result === 'string' ? result : ((result as { response?: unknown }).response ?? result);
-
-  let parsed: unknown = extractJsonFromAiResponse(raw);
-
-  if (!isDesignDraft(parsed)) {
-    throw new Error('AI response did not match DESIGN_SCHEMA');
-  }
+  // Design draft is more verbose (one block per element) — bump the ceiling.
+  let parsed: DesignDraft = await runDraftModel(ai, {
+    model: opts.model ?? DEFAULT_AI_MODEL,
+    messages,
+    schema: DESIGN_SCHEMA,
+    maxTokens: 1536,
+    label: 'Workers AI (design)',
+    validate: isDesignDraft,
+  });
 
   // The model is told to echo selectors verbatim, but Workers AI sometimes
   // shortens or rewords. If we got a count match, restore each item's
@@ -761,10 +932,10 @@ export const generateDesignDraft = async (
         if (!src) return item;
         return { ...item, selector: src.selector };
       }),
-    } as DesignDraft;
+    };
   }
 
-  return parsed as DesignDraft;
+  return parsed;
 };
 
 // ────────────────────────────────────────────────────────────────────────
@@ -786,33 +957,14 @@ export const generateBugDraft = async (
     { role: 'user', content: buildUserPrompt(redactJwt(opts.userInput), summary) },
   ];
 
-  const result = (await withTimeout(
-    ai.run(opts.model ?? DEFAULT_AI_MODEL, {
-      messages,
-      response_format: {
-        type: 'json_schema',
-        json_schema: BUG_SCHEMA,
-      },
-      // Workers AI sometimes ignores the schema if max_tokens is too low —
-      // budget enough for ~500 output tokens of Korean.
-      max_tokens: 768,
-    } as Parameters<Ai['run']>[1]),
-    AI_TIMEOUT_MS,
-    'Workers AI (bug)',
-  )) as { response?: unknown } | string;
-
-  // Workers AI returns { response: ... } for chat; the response can already
-  // be a parsed object when json_schema is honored, or a JSON string with
-  // assorted decorations (code fences, prose prefix). `extractJsonFromAiResponse`
-  // handles all the common shapes.
-  const raw =
-    typeof result === 'string' ? result : ((result as { response?: unknown }).response ?? result);
-
-  const parsed: unknown = extractJsonFromAiResponse(raw);
-
-  if (!isBugDraft(parsed)) {
-    throw new Error('AI response did not match BUG_SCHEMA');
-  }
+  const parsed = await runDraftModel(ai, {
+    model: opts.model ?? DEFAULT_AI_MODEL,
+    messages,
+    schema: BUG_SCHEMA,
+    maxTokens: 1024,
+    label: 'Workers AI (bug)',
+    validate: isBugDraft,
+  });
 
   // If the model returned null for attachments but we sniffed something
   // useful from the raw artifacts, prefer the sniffed value — the model
