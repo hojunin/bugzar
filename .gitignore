@@ -46,5 +46,8 @@ test-results/
 *.crx
 packages/backend/wrangler.local.jsonc
 
+# npm auth — holds the publish token, never commit.
+.npmrc
+
 # npm pack artifacts (build output)
 *.tgz
