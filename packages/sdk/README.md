@@ -176,7 +176,9 @@ Jira issue for you:
 On stop the bundle uploads, then the drawer opens with a read-only **capture
 summary** (events · console errors · failed requests · LCP), an editable
 Title / Description / Epic, and an **AI polish** button that drafts the issue
-from the captured session. Publishing files the issue through the Worker's Jira
+from the captured session. The **Epic** field resolves a full key
+(`CBPFE-3991`), a bare issue number (`3991`), or a pasted Jira browse URL
+(`…/browse/CBPFE-3991`). Publishing files the issue through the Worker's Jira
 service account — the browser never holds an Atlassian token.
 
 > **Requires a configured Worker + Jira service account.** If the Worker is not

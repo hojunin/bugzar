@@ -242,6 +242,51 @@ describe('M4 review drawer — fields + publish', () => {
     expect((screen.getByLabelText('Epic') as HTMLInputElement).value).toBe('Checkout epic');
   });
 
+  it('normalizes a pasted browse URL to the issue key before searching', async () => {
+    const fetchMock = renderJira();
+    startThenStop();
+    await screen.findByRole('button', { name: 'Publish' });
+
+    fireEvent.change(screen.getByLabelText('Epic'), {
+      target: { value: 'https://jira.team.musinsa.com/browse/BUGZAR-10' },
+    });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([u]) => String(u).includes('/jira/epics') && String(u).includes('q=BUGZAR-10'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('qualifies a bare issue number with the default-epic project before searching', async () => {
+    // renderJira sets defaultEpicKey "BUGZAR-1" → project "BUGZAR", so "10" → "BUGZAR-10".
+    const fetchMock = renderJira();
+    startThenStop();
+    await screen.findByRole('button', { name: 'Publish' });
+
+    fireEvent.change(screen.getByLabelText('Epic'), { target: { value: '10' } });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([u]) => String(u).includes('/jira/epics') && String(u).includes('q=BUGZAR-10'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('guides the accepted epic input forms via placeholder + tooltip', async () => {
+    renderJira();
+    startThenStop();
+    await screen.findByRole('button', { name: 'Publish' });
+
+    const field = screen.getByLabelText('Epic') as HTMLInputElement;
+    // Placeholder + native tooltip spell out the three accepted forms.
+    expect(field.placeholder).toMatch(/URL/i);
+    expect(field.getAttribute('title')).toMatch(/URL/i);
+    expect(field.getAttribute('title')).toMatch(/3991/); // an example ticket id
+  });
+
   it('shows the epic ticket key next to the title in the dropdown', async () => {
     renderJira();
     startThenStop();

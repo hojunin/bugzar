@@ -11,6 +11,7 @@ export function EpicCombobox({ epic }: { epic: EpicSearch }) {
       <input
         className="bugzar-input"
         aria-label={t.jiraEpic}
+        title={t.epicSearchHint}
         value={epic.query}
         onChange={(e) => epic.onQueryChange(e.target.value)}
         onFocus={epic.onFocus}

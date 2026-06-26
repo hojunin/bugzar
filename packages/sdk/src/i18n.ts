@@ -60,6 +60,7 @@ export interface Strings {
   titlePlaceholder: string;
   descriptionPlaceholder: string;
   epicSearchPlaceholder: string;
+  epicSearchHint: string;
   epicSearching: string;
   epicNoResults: string;
   aiPolish: string;
@@ -122,7 +123,9 @@ const EN: Strings = {
   jiraEpic: 'Epic',
   titlePlaceholder: 'Short summary',
   descriptionPlaceholder: 'What happened?',
-  epicSearchPlaceholder: 'Search epics…',
+  epicSearchPlaceholder: 'Search by title, ticket ID, or URL…',
+  epicSearchHint:
+    'Search by epic title, or paste a ticket ID (CBPFE-3991 or just 3991) or a full Jira URL.',
   epicSearching: 'Searching…',
   epicNoResults: 'No epics found',
   aiPolish: '✨Write with AI',
@@ -188,7 +191,9 @@ const KO: Strings = {
   jiraEpic: '에픽',
   titlePlaceholder: '간단한 요약',
   descriptionPlaceholder: '무슨 일이 있었나요?',
-  epicSearchPlaceholder: '에픽 검색…',
+  epicSearchPlaceholder: '제목·티켓ID·URL로 검색…',
+  epicSearchHint:
+    '에픽 제목으로 검색하거나, 티켓 ID(CBPFE-3991 또는 3991) 또는 Jira URL을 붙여넣으세요.',
   epicSearching: '검색 중…',
   epicNoResults: '에픽을 찾을 수 없어요',
   aiPolish: '✨AI로 작성',

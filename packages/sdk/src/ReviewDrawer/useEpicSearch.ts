@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { searchEpics } from '../oauth/atlassian';
 import type { AuthState } from '../oauth/use-atlassian-auth';
+import { epicProjectPrefix, normalizeEpicQuery } from './epic-input';
 import { loadLastEpic } from './last-epic';
 
 export interface Epic {
@@ -43,6 +44,9 @@ export function useEpicSearch({
     () => (defaultEpicKey ? { key: defaultEpicKey, summary: defaultEpicKey } : loadLastEpic()),
     [defaultEpicKey],
   );
+  // Project of the prefilled/last-used epic — lets a bare issue number (e.g.
+  // "3991") be qualified into a full key for the search.
+  const projectPrefix = useMemo(() => epicProjectPrefix(prefillEpic?.key), [prefillEpic]);
   const [query, setQuery] = useState(prefillEpic?.summary ?? '');
   const [key, setKey] = useState(prefillEpic?.key ?? '');
   const [touched, setTouched] = useState(false);
@@ -54,7 +58,8 @@ export function useEpicSearch({
   // token through the Worker proxy; legacy mode uses the service-account route.
   useEffect(() => {
     if (!touched) return;
-    const q = query.trim();
+    // Accept a pasted browse URL or a bare issue number, not just "KEY-123".
+    const q = normalizeEpicQuery(query, projectPrefix);
     if (!q) {
       setResults([]);
       setOpen(false);
@@ -85,7 +90,7 @@ export function useEpicSearch({
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [query, touched, base, headers, oauth, getToken, authState]);
+  }, [query, touched, base, headers, oauth, getToken, authState, projectPrefix]);
 
   const onQueryChange = (value: string): void => {
     setTouched(true);
