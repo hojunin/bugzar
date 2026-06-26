@@ -1,7 +1,7 @@
 'use client';
 
 import { captureSnapshot, collectSystemInfo } from '@bugzar/capture-core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { type PickerHandle, startDesignPick } from '../picker/picker';
 import type {
@@ -31,17 +31,45 @@ export interface BugzarProps {
   onStart?: () => void;
   /** Mask every text input (passwords are always masked regardless). Default true. */
   mask?: boolean;
-  /** Toolbar corner. Default 'bottom-right'. */
+  /**
+   * Toolbar corner the widget anchors to.
+   *
+   * @default 'bottom-right'
+   */
   position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
   /**
-   * Auto-hide the toolbar so it isn't always-on noise. When true it stays tucked
-   * off the anchored edge and slides up only while the cursor is over a 300×30
-   * hotspot in that corner; it stays pinned (no auto-hide) while in use
-   * (recording / annotating / uploading / review drawer), then returns to the
-   * idle toolbar for 2s before tucking down again. Mouse-only by design. Default
-   * false (always-on, unchanged behavior).
+   * Inset, in pixels, from the two anchored corner edges (the `position` corner).
+   * Pass a single number to inset both axes equally, or `{ x, y }` to set them
+   * independently — an omitted axis falls back to `20`. Applies to both the
+   * toolbar and the review drawer; when `autoHide` is on, the tucked-away toolbar
+   * also slides fully past this inset so it sits off-screen.
+   *
+   * @default 20
+   * @example offset={32}               // 32px from both anchored edges
+   * @example offset={{ x: 24, y: 88 }} // clear a bottom-right action button
+   */
+  offset?: number | { x?: number; y?: number };
+  /**
+   * Auto-hide the toolbar so it isn't always-on chrome. When `true` it stays
+   * tucked off the anchored edge and slides into view only while the cursor is
+   * inside the corner `hoverZone`, while the widget is in use (recording /
+   * annotating / uploading / review drawer), or for a 2s grace period after use.
+   * Reveal is mouse-only by design (geometric hover, not focus/touch). When
+   * `false` the toolbar is always visible (classic behavior, unchanged).
+   *
+   * @default false
    */
   autoHide?: boolean;
+  /**
+   * Size, in pixels, of the invisible corner region you hover to reveal the
+   * auto-hidden toolbar. Shrink it when the default zone overlaps your own UI
+   * (e.g. a chat bubble or CTA sharing that corner). `{ width, height }`; an
+   * omitted axis keeps its default. Only used when `autoHide` is `true`.
+   *
+   * @default { width: 300, height: 30 }
+   * @example hoverZone={{ width: 80, height: 16 }}
+   */
+  hoverZone?: { width?: number; height?: number };
   /** Color theme. Default 'auto' (follows prefers-color-scheme). */
   theme?: 'light' | 'dark' | 'auto';
   /**
@@ -102,8 +130,10 @@ export function Bugzar({
   onStart,
   mask = true,
   position = 'bottom-right',
+  offset,
   theme = 'auto',
   autoHide = false,
+  hoverZone,
   onExport,
   endpoint,
   onError,
@@ -239,7 +269,23 @@ export function Bugzar({
 
   // "In use" → pin the toolbar open regardless of hover (the fix rule).
   const inUse = recording || uploading || picking || !!drawer;
-  const { revealed, collapsed } = useAutoHide({ autoHide, mounted, position, inUse, rootRef });
+  const { revealed, collapsed } = useAutoHide({
+    autoHide,
+    mounted,
+    position,
+    inUse,
+    rootRef,
+    ...(hoverZone ? { hoverZone } : {}),
+  });
+
+  // Custom corner inset → CSS variables the position rules (and autoHide slide)
+  // read; left unset, the stylesheet keeps its 20px default.
+  const offX = typeof offset === 'number' ? offset : (offset?.x ?? 20);
+  const offY = typeof offset === 'number' ? offset : (offset?.y ?? 20);
+  const rootStyle =
+    offset === undefined
+      ? undefined
+      : ({ '--bugzar-offset-x': `${offX}px`, '--bugzar-offset-y': `${offY}px` } as CSSProperties);
 
   if (!mounted || typeof document === 'undefined') return null;
   // While picking, the picker renders its own panel — hide the toolbar.
@@ -259,6 +305,7 @@ export function Bugzar({
           : { annotations: drawer.annotations })}
         position={position}
         theme={theme}
+        {...(rootStyle ? { style: rootStyle } : {})}
         {...(onPublished ? { onPublished } : {})}
         onClose={() => setDrawer(null)}
       />,
@@ -270,6 +317,7 @@ export function Bugzar({
     <Toolbar
       position={position}
       theme={theme}
+      {...(rootStyle ? { style: rootStyle } : {})}
       recording={recording}
       uploading={uploading}
       elapsed={elapsed}

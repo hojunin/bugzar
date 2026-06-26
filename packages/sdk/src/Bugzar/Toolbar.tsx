@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import { getStrings } from '../i18n';
 
 type Position = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
@@ -35,6 +35,8 @@ function PenIcon() {
 interface ToolbarProps {
   position: Position;
   theme: Theme;
+  /** Inline CSS-variable overrides for the corner inset (--bugzar-offset-*). */
+  style?: CSSProperties;
   recording: boolean;
   uploading: boolean;
   elapsed: number;
@@ -53,6 +55,7 @@ interface ToolbarProps {
 export function Toolbar({
   position,
   theme,
+  style,
   recording,
   uploading,
   elapsed,
@@ -70,6 +73,7 @@ export function Toolbar({
     <div
       ref={rootRef}
       className={`bugzar-root bugzar-${position} bugzar-theme-${theme}`}
+      {...(style ? { style } : {})}
       data-bugzar-recording={recording ? 'true' : 'false'}
       data-bugzar-revealed={autoHide ? (revealed ? 'true' : 'false') : undefined}
       inert={collapsed || undefined}

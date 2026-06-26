@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useEffect, useMemo, useState } from 'react';
 import { getStrings } from '../i18n';
 import { useAtlassianAuth } from '../oauth/use-atlassian-auth';
 import type { DesignAnnotation, PublishResult, ReportBundle } from '../public-types';
@@ -29,6 +29,8 @@ export interface ReviewDrawerProps {
   annotations?: DesignAnnotation[];
   position: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
   theme: 'light' | 'dark' | 'auto';
+  /** Inline CSS-variable overrides for the corner inset (--bugzar-offset-*). */
+  style?: CSSProperties;
   onPublished?: (result: PublishResult) => void;
   onClose: () => void;
 }
@@ -56,6 +58,7 @@ export function ReviewDrawer({
   annotations,
   position,
   theme,
+  style,
   onPublished,
   onClose,
 }: ReviewDrawerProps) {
@@ -116,6 +119,7 @@ export function ReviewDrawer({
   return (
     <div
       className={`bugzar-root bugzar-${position} bugzar-theme-${theme}`}
+      {...(style ? { style } : {})}
       role="dialog"
       aria-modal="true"
       aria-label={mode === 'design' ? t.drawerTitleDesign : t.drawerTitleBug}
@@ -125,7 +129,7 @@ export function ReviewDrawer({
           <PublishedView published={pub.published} onClose={onClose} />
         ) : oauth && authState.kind !== 'authenticated' ? (
           <ConnectGate
-            uploadedLink={uploadedLink}
+            reportUrl={url}
             authError={authError}
             connecting={connecting}
             authLoading={authState.kind === 'loading'}

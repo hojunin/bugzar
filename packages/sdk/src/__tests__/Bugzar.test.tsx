@@ -149,4 +149,36 @@ describe('Bugzar autoHide', () => {
     });
     expect(revealed()).toBe('true');
   });
+
+  it('hoverZone shrinks the reveal zone', () => {
+    render(<Bugzar autoHide hoverZone={{ width: 6, height: 6 }} />);
+    // Inside the default 300×30 corner but outside the custom 6×6 → stays hidden.
+    move(window.innerWidth - 10, window.innerHeight - 5);
+    expect(revealed()).toBe('false');
+    // Inside the shrunk hotspot → reveals.
+    move(window.innerWidth - 3, window.innerHeight - 3);
+    expect(revealed()).toBe('true');
+  });
+});
+
+describe('Bugzar offset', () => {
+  const widget = () => document.querySelector('.bugzar-root') as HTMLElement | null;
+
+  it('unset → no inline CSS vars (stylesheet 20px default stands)', () => {
+    render(<Bugzar />);
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-x')).toBe('');
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-y')).toBe('');
+  });
+
+  it('a number sets both axes', () => {
+    render(<Bugzar offset={40} />);
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-x')).toBe('40px');
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-y')).toBe('40px');
+  });
+
+  it('{ x, y } sets each axis independently; a missing axis falls back to 20', () => {
+    render(<Bugzar offset={{ x: 8 }} />);
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-x')).toBe('8px');
+    expect(widget()?.style.getPropertyValue('--bugzar-offset-y')).toBe('20px');
+  });
 });

@@ -66,7 +66,10 @@ accordingly.
 | `onStart` | `() => void` | – | Called when recording starts. |
 | `mask` | `boolean` | `true` | Mask all text inputs (passwords are always masked regardless). |
 | `position` | `'bottom-right' \| 'bottom-left' \| 'top-right' \| 'top-left'` | `'bottom-right'` | Toolbar corner. |
+| `offset` | `number \| { x?: number; y?: number }` | `20` | Inset (px) from the anchored corner edges. A number sets both axes; `{ x, y }` sets them independently (a missing axis falls back to 20). Applies to the toolbar and the review drawer. |
 | `theme` | `'light' \| 'dark' \| 'auto'` | `'auto'` | Color theme. |
+| `autoHide` | `boolean` | `false` | Tuck the toolbar off the anchored edge; it slides in only while the cursor is over the corner `hoverZone`, while in use, or for 2s after. Mouse-only. |
+| `hoverZone` | `{ width?: number; height?: number }` | `{ width: 300, height: 30 }` | Size (px) of the invisible corner region you hover to reveal the auto-hidden toolbar — shrink it when the default zone overlaps your own UI. A missing axis keeps its default. Only used when `autoHide` is on. |
 | `endpoint` | `string \| { url: string; headers?: Record<string, string> }` | – | Bugzar Worker base URL — the **Jira backend only** (auth + AI draft + server-side issue creation). Set together with `jira` to enable the review drawer. Use the object form to send auth headers on every request. |
 | `onError` | `(error: Error) => void` | – | Called if the upload fails (when `endpoint` is set). |
 | `onBeforeUpload` | `(bundle: ReportBundle) => ReportBundle \| Promise<ReportBundle>` | – | Last-chance scrub of the bundle before upload. Strip secrets the built-in redaction misses. See [Privacy & redaction](#privacy--redaction). |

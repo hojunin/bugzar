@@ -34,10 +34,10 @@ const CSS = `
     --bugzar-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   }
 }
-.bugzar-bottom-right { right: 20px; bottom: 20px; }
-.bugzar-bottom-left  { left: 20px;  bottom: 20px; }
-.bugzar-top-right    { right: 20px; top: 20px; }
-.bugzar-top-left     { left: 20px;  top: 20px; }
+.bugzar-bottom-right { right: var(--bugzar-offset-x, 20px); bottom: var(--bugzar-offset-y, 20px); }
+.bugzar-bottom-left  { left: var(--bugzar-offset-x, 20px);  bottom: var(--bugzar-offset-y, 20px); }
+.bugzar-top-right    { right: var(--bugzar-offset-x, 20px); top: var(--bugzar-offset-y, 20px); }
+.bugzar-top-left     { left: var(--bugzar-offset-x, 20px);  top: var(--bugzar-offset-y, 20px); }
 
 .bugzar-fab, .bugzar-pill {
   display: inline-flex;
@@ -293,9 +293,9 @@ const CSS = `
    don't add scroll, so the corner stays free and never blocks page clicks.
    Hover is detected in JS by geometry, not by this element. */
 .bugzar-root[data-bugzar-revealed] { transition: transform 0.24s ease; }
-.bugzar-root[data-bugzar-revealed="false"] { transform: translateY(calc(100% + 20px)); }
+.bugzar-root[data-bugzar-revealed="false"] { transform: translateY(calc(100% + var(--bugzar-offset-y, 20px))); }
 .bugzar-root.bugzar-top-right[data-bugzar-revealed="false"],
-.bugzar-root.bugzar-top-left[data-bugzar-revealed="false"] { transform: translateY(calc(-100% - 20px)); }
+.bugzar-root.bugzar-top-left[data-bugzar-revealed="false"] { transform: translateY(calc(-100% - var(--bugzar-offset-y, 20px))); }
 .bugzar-root[data-bugzar-revealed="true"] { transform: translateY(0); }
 
 @media (prefers-reduced-motion: reduce) {

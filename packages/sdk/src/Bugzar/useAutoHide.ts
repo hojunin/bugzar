@@ -9,13 +9,24 @@ interface UseAutoHideArgs {
   /** Pinned open while in use (recording / uploading / picking / drawer). */
   inUse: boolean;
   rootRef: RefObject<HTMLDivElement | null>;
+  /** Hover-to-reveal zone size (px); a missing axis keeps its default (300×30). */
+  hoverZone?: { width?: number; height?: number };
 }
 
 /** The autoHide reveal machine: geometric hover + a 2s post-use grace hold. */
-export function useAutoHide({ autoHide, mounted, position, inUse, rootRef }: UseAutoHideArgs): {
+export function useAutoHide({
+  autoHide,
+  mounted,
+  position,
+  inUse,
+  rootRef,
+  hoverZone,
+}: UseAutoHideArgs): {
   revealed: boolean;
   collapsed: boolean;
 } {
+  const hotW = hoverZone?.width ?? 300;
+  const hotH = hoverZone?.height ?? 30;
   // autoHide reveal state: cursor in the hotspot/toolbar, and the 2s post-use hold.
   const [hovering, setHovering] = useState(false);
   const [grace, setGrace] = useState(false);
@@ -25,7 +36,7 @@ export function useAutoHide({ autoHide, mounted, position, inUse, rootRef }: Use
   // Geometric hover detection (autoHide only): a passive window `pointermove`
   // decides `hovering` from coordinates, so the collapsed corner never blocks
   // page clicks (the dock is pointer-events:none). The hot-zone is the union of
-  // a fixed 300×30 corner hotspot (computed from innerWidth/innerHeight — always
+  // a hotW×hotH corner hotspot (computed from innerWidth/innerHeight — always
   // reliable) and the live toolbar rect (keep-alive while revealed).
   // biome-ignore lint/correctness/useExhaustiveDependencies: rootRef is a stable ref read lazily at pointermove time; its identity never changes, so it is intentionally excluded from deps.
   useEffect(() => {
@@ -35,8 +46,8 @@ export function useAutoHide({ autoHide, mounted, position, inUse, rootRef }: Use
       const vh = window.innerHeight;
       const left = position.endsWith('left');
       const top = position.startsWith('top');
-      const inCornerX = left ? x >= 0 && x <= 300 : x >= vw - 300 && x <= vw;
-      const inCornerY = top ? y >= 0 && y <= 30 : y >= vh - 30 && y <= vh;
+      const inCornerX = left ? x >= 0 && x <= hotW : x >= vw - hotW && x <= vw;
+      const inCornerY = top ? y >= 0 && y <= hotH : y >= vh - hotH && y <= vh;
       if (inCornerX && inCornerY) return true;
       const r = rootRef.current?.getBoundingClientRect();
       return (
@@ -51,7 +62,7 @@ export function useAutoHide({ autoHide, mounted, position, inUse, rootRef }: Use
     const onMove = (e: PointerEvent) => setHovering(inZone(e.clientX, e.clientY));
     window.addEventListener('pointermove', onMove, { passive: true });
     return () => window.removeEventListener('pointermove', onMove);
-  }, [autoHide, mounted, position]);
+  }, [autoHide, mounted, position, hotW, hotH]);
 
   // 2s grace after a use ends (inUse true→false): hold the idle toolbar open,
   // then let hover decide again. Re-entering use cancels the pending hide.

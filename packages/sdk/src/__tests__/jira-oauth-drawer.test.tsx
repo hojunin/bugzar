@@ -89,6 +89,37 @@ afterEach(() => {
 });
 
 describe('Jira OAuth drawer (clientId set)', () => {
+  it('Skip on the connect gate opens the uploaded report and closes — no standalone link', async () => {
+    const openSpy = vi.fn();
+    vi.stubGlobal('open', openSpy);
+    render(
+      <Bugzar
+        endpoint="https://w.dev"
+        jira={{ clientId: 'cid' }}
+        onExport={async () => 'https://cdn.example.com/r/x.html'}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Leave design feedback on elements'));
+    await act(async () => {
+      pickerRef.onComplete?.(ANNOTATIONS);
+    });
+
+    // The connect gate carries no separate "View report" link — Skip owns that job.
+    const skip = await screen.findByText('Skip, just keep the report');
+    expect(screen.queryByRole('link', { name: /View report/i })).toBeNull();
+
+    fireEvent.click(skip);
+
+    // Skip pops the uploaded report in a new tab…
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://cdn.example.com/r/x.html',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    // …then dismisses the drawer (back to the toolbar — connect gate gone).
+    await waitFor(() => expect(screen.queryByText('Skip, just keep the report')).toBeNull());
+  });
+
   it('annotate → drawer asks to connect → connect → publishes AS THE USER', async () => {
     render(<Bugzar endpoint="https://w.dev" jira={{ clientId: 'cid' }} />);
     fireEvent.click(screen.getByLabelText('Leave design feedback on elements'));

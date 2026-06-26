@@ -37,6 +37,32 @@ export function App() {
   const jiraMode = params.has('jira');
   const endpoint = params.get('endpoint') ?? (jiraMode ? window.location.origin : undefined);
 
+  // Positioning/visibility knobs, driven by query params so you can eyeball the
+  // new props without a rebuild:
+  //   ?position=top-left  ?offset=40  ?offset=24x88  ?autohide  ?hoverzone=80x16
+  const POSITIONS = ['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const;
+  const positionParam = POSITIONS.find((p) => p === params.get('position'));
+  const parseSize = (v: string | null): { width?: number; height?: number } | undefined => {
+    if (!v) return undefined;
+    const [w, h] = v.split('x').map((n) => Number.parseInt(n, 10));
+    return {
+      ...(Number.isFinite(w) ? { width: w } : {}),
+      ...(Number.isFinite(h) ? { height: h } : {}),
+    };
+  };
+  const parseOffset = (v: string | null): number | { x?: number; y?: number } | undefined => {
+    if (!v) return undefined;
+    if (v.includes('x')) {
+      const [x, y] = v.split('x').map((n) => Number.parseInt(n, 10));
+      return { ...(Number.isFinite(x) ? { x } : {}), ...(Number.isFinite(y) ? { y } : {}) };
+    }
+    const n = Number.parseInt(v, 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const autoHide = params.has('autohide');
+  const offset = parseOffset(params.get('offset'));
+  const hoverZone = parseSize(params.get('hoverzone'));
+
   return (
     <main
       style={{
@@ -170,6 +196,10 @@ export function App() {
       )}
 
       <Bugzar
+        {...(positionParam ? { position: positionParam } : {})}
+        {...(offset !== undefined ? { offset } : {})}
+        {...(autoHide ? { autoHide: true } : {})}
+        {...(hoverZone ? { hoverZone } : {})}
         {...(endpoint ? { endpoint } : {})}
         {...(jiraMode
           ? {
