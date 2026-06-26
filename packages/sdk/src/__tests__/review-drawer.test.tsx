@@ -187,7 +187,7 @@ describe('AI draft — stub notice (limit/error transparency)', () => {
     renderJira({}, fetchMock);
     startThenStop();
     await screen.findByRole('button', { name: 'Publish' });
-    fireEvent.click(screen.getByLabelText('AI polish'));
+    fireEvent.click(screen.getByLabelText('Write with AI'));
     await waitFor(() => expect(screen.getByText(/basic draft/i)).toBeTruthy());
   });
 
@@ -195,7 +195,7 @@ describe('AI draft — stub notice (limit/error transparency)', () => {
     renderJira();
     startThenStop();
     await screen.findByRole('button', { name: 'Publish' });
-    fireEvent.click(screen.getByLabelText('AI polish'));
+    fireEvent.click(screen.getByLabelText('Write with AI'));
     await waitFor(() =>
       expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('AI title'),
     );
@@ -255,14 +255,14 @@ describe('M4 review drawer — fields + publish', () => {
     expect(option.textContent).toContain('Checkout epic');
   });
 
-  it('AI polish fills title/description from /jira/draft (inline artifacts, no reportId)', async () => {
+  it('Write with AI fills title/description from /jira/draft (inline artifacts, no reportId)', async () => {
     const fetchMock = renderJira();
     startThenStop();
     await screen.findByRole('button', { name: 'Publish' });
 
     // Seed a one-liner — the real /jira/draft 400s on empty userInput.
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'checkout broke' } });
-    fireEvent.click(screen.getByRole('button', { name: 'AI polish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Write with AI' }));
     await waitFor(() =>
       expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('AI title'),
     );
@@ -284,7 +284,7 @@ describe('M4 review drawer — fields + publish', () => {
     await screen.findByRole('button', { name: 'Publish' });
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'seed' } });
-    fireEvent.click(screen.getByRole('button', { name: 'AI polish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Write with AI' }));
     await waitFor(() =>
       expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('AI title'),
     );
@@ -303,10 +303,10 @@ describe('M4 review drawer — fields + publish', () => {
     await screen.findByRole('button', { name: 'Publish' });
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'seed' } });
-    fireEvent.click(screen.getByRole('button', { name: 'AI polish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Write with AI' }));
     // The AI-fail fallback message (the button label also contains "AI", so match
     // the distinctive fallback copy to stay unambiguous).
-    expect(await screen.findByText(/AI polish is unavailable/i)).toBeTruthy();
+    expect(await screen.findByText(/Writing with AI is unavailable/i)).toBeTruthy();
     // manual publish still works
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Manual title' } });
     expect((screen.getByRole('button', { name: 'Publish' }) as HTMLButtonElement).disabled).toBe(

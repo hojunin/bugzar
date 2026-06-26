@@ -173,13 +173,13 @@ describe('F4.3 design-mode publish', () => {
     expect(link.getAttribute('target')).toBe('_blank');
   });
 
-  it('AI polish posts the design draft inline (mode:design, note→userNote)', async () => {
+  it('Write with AI posts the design draft inline (mode:design, note→userNote)', async () => {
     const fetchMock = renderDesign();
     await pickThenFinish();
     await screen.findByRole('button', { name: 'Publish' });
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'spacing is off' } });
-    fireEvent.click(screen.getByRole('button', { name: 'AI polish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Write with AI' }));
     await waitFor(() =>
       expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('AI design title'),
     );
