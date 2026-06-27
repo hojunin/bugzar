@@ -1,16 +1,16 @@
-// A2 — deterministic reproduction steps from raw rrweb events. Two halves:
-//   1) ACTION EXTRACTION (ported from the backend's buildTimeline): index the
-//      FullSnapshot (type===2) node map, then resolve MouseInteraction/Input
-//      target ids to identifier-first labels `[tag "text" — hint]`.
-//   2) CURATION (NEW, viewer-only — the backend leaves this to an LLM, so there
-//      is no function to reuse): window to the failure, dedup, mask-safe input,
-//      end on the observed symptom.
+// A2 — deterministic reproduction steps for the viewer's Steps panel.
+//
+// The rrweb INTERPRETATION (snapshot indexing, radio/checkbox + synthesized-
+// click de-dup, ancestry collapse) is shared with the backend in
+// `@bugzar/shared` (`extractReproActions`) so the two surfaces can't drift. This
+// file only does the VIEWER-specific parts: English labels, ×N run-collapsing,
+// and ending on the observed failure.
 //
 // Session-mode only: a design-mode export ships a 2-event snapshot with no
 // interactions, so this yields []. No fabricated input — rrweb-masked values are
 // labelled, never invented.
 
-import type { RrwebEvent } from '@bugzar/shared';
+import { type ActionTarget, extractReproActions, type ReproAction } from '@bugzar/shared';
 import { deriveDiagnostics } from './diagnostics';
 import type { ReportData } from './types';
 
@@ -22,142 +22,32 @@ export interface ReproStep {
   text: string;
 }
 
-// --- ported node-map indexing (mirrors backend jira-draft.ts) ---
-
-interface SerializedNode {
-  type?: number;
-  id?: number;
-  tagName?: string;
-  attributes?: Record<string, string | number | boolean | null>;
-  textContent?: string;
-  childNodes?: SerializedNode[];
-}
-interface ElementInfo {
-  tag: string;
-  text: string;
-  hint: string;
-  /** Node is inside Bugzar's own recorder UI (class `bugzar-…`) — not a repro step. */
-  isBugzar: boolean;
-}
-
-function collectInnerText(node: SerializedNode | undefined, budget = 60): string {
-  if (!node || budget <= 0) return '';
-  if (node.type === 3 && typeof node.textContent === 'string')
-    return node.textContent.slice(0, budget);
-  let acc = '';
-  for (const child of node.childNodes ?? []) {
-    if (acc.length >= budget) break;
-    acc += collectInnerText(child, budget - acc.length);
+/** Identifier-first hint: data-testid → aria-label → role → first non-utility class. */
+function buildHint(target: ActionTarget): string {
+  if (target.testId) return `[data-testid="${target.testId}"]`;
+  if (target.ariaLabel) return `[aria-label="${target.ariaLabel.slice(0, 30)}"]`;
+  if (target.role) return `[role="${target.role}"]`;
+  if (target.className) {
+    const first = target.className.split(/\s+/).find((c) => c && !c.startsWith('css-'));
+    if (first) return `${target.tag}.${first}`;
   }
-  return acc;
+  return target.tag;
 }
 
-function buildHint(
-  tag: string,
-  attrs: Record<string, string | number | boolean | null> | undefined,
-): string {
-  if (!attrs) return tag;
-  const testId = attrs['data-testid'] ?? attrs['data-test'] ?? attrs['data-cy'];
-  if (typeof testId === 'string' && testId) return `[data-testid="${testId}"]`;
-  const aria = attrs['aria-label'];
-  if (typeof aria === 'string' && aria) return `[aria-label="${aria.slice(0, 30)}"]`;
-  const role = attrs.role;
-  if (typeof role === 'string' && role) return `[role="${role}"]`;
-  const className = attrs.class ?? attrs.className;
-  if (typeof className === 'string' && className) {
-    const first = className.split(/\s+/).find((c) => c && !c.startsWith('css-'));
-    if (first) return `${tag}.${first}`;
+function describeTarget(target: ActionTarget | null): string {
+  if (!target) return '(unknown element)';
+  const text = target.text ? ` "${target.text}"` : '';
+  const hint = buildHint(target);
+  return `[${target.tag}${text}${hint !== target.tag ? ` — ${hint}` : ''}]`;
+}
+
+function actionToText(a: ReproAction): string {
+  if (a.kind === 'navigate') return `Navigate to ${a.href}`;
+  if (a.kind === 'type') {
+    const suffix = a.masked ? ' (value masked)' : a.value ? ` "${a.value}"` : '';
+    return `Type into ${describeTarget(a.target)}${suffix}`;
   }
-  return tag;
-}
-
-const classOf = (n: SerializedNode): string => {
-  const c = n.attributes?.class ?? n.attributes?.className;
-  return typeof c === 'string' ? c : '';
-};
-
-function walkSnapshot(
-  node: SerializedNode | undefined,
-  index: Map<number, ElementInfo>,
-  inBugzar = false,
-): void {
-  if (!node) return;
-  // Bugzar's widget root carries a `bugzar-` class — mark it and everything under
-  // it so clicks anywhere in the recorder toolbar are excluded from repro steps.
-  const bugzar = inBugzar || /\bbugzar-/.test(classOf(node));
-  if (node.type === 2 && typeof node.id === 'number' && typeof node.tagName === 'string') {
-    index.set(node.id, {
-      tag: node.tagName.toLowerCase(),
-      text: collectInnerText(node).trim().replace(/\s+/g, ' '),
-      hint: buildHint(node.tagName.toLowerCase(), node.attributes),
-      isBugzar: bugzar,
-    });
-  }
-  for (const child of node.childNodes ?? []) walkSnapshot(child, index, bugzar);
-}
-
-function indexFullSnapshots(events: RrwebEvent[]): Map<number, ElementInfo> {
-  const index = new Map<number, ElementInfo>();
-  for (const ev of events) {
-    const e = ev as { type?: number; data?: { node?: SerializedNode } };
-    if (e?.type !== 2) continue;
-    walkSnapshot(e.data?.node, index);
-  }
-  return index;
-}
-
-function describeTarget(node: ElementInfo | undefined): string {
-  if (!node) return '(unknown element)';
-  const text = node.text ? ` "${node.text}"` : '';
-  const hint = node.hint !== node.tag ? ` — ${node.hint}` : '';
-  return `[${node.tag}${text}${hint}]`;
-}
-
-/** rrweb strict-masks input values to runs of `*`; never invent a real value. */
-const isMasked = (v: string): boolean => /^\*+$/.test(v);
-
-/** Skip Bugzar's own recorder UI and bare background (html/body) clicks. */
-const skipTarget = (info: ElementInfo | undefined): boolean =>
-  !!info && (info.isBugzar || info.tag === 'html' || info.tag === 'body');
-
-// --- extraction + curation ---
-
-function extractActions(events: RrwebEvent[], sessionStart: number): ReproStep[] {
-  const idx = indexFullSnapshots(events);
-  const out: ReproStep[] = [];
-  let lastUrl: string | undefined;
-
-  for (const ev of events) {
-    const e = ev as {
-      type?: number;
-      timestamp?: number;
-      data?: { href?: string; source?: number; id?: number; text?: string; type?: number };
-    };
-    if (typeof e?.timestamp !== 'number') continue;
-    const t = e.timestamp - sessionStart;
-
-    if (e.type === 4 && typeof e.data?.href === 'string') {
-      if (e.data.href !== lastUrl) {
-        if (lastUrl !== undefined) out.push({ t, text: `Navigate to ${e.data.href}` });
-        lastUrl = e.data.href;
-      }
-      continue;
-    }
-    if (e.type !== 3) continue;
-    const source = e.data?.source;
-    if (source === 2 && e.data?.type === 2 && typeof e.data?.id === 'number') {
-      const info = idx.get(e.data.id);
-      if (skipTarget(info)) continue; // recorder toolbar / background click
-      out.push({ t, text: `Click ${describeTarget(info)}` });
-    } else if (source === 5 && typeof e.data?.id === 'number') {
-      const info = idx.get(e.data.id);
-      if (skipTarget(info)) continue;
-      const raw = typeof e.data.text === 'string' ? e.data.text : '';
-      const suffix = !raw ? '' : isMasked(raw) ? ' (value masked)' : ` "${raw.slice(0, 40)}"`;
-      out.push({ t, text: `Type into ${describeTarget(info)}${suffix}` });
-    }
-  }
-  return out;
+  return `Click ${describeTarget(a.target)}`;
 }
 
 /**
@@ -179,12 +69,15 @@ function collapseRuns(actions: ReproStep[]): ReproStep[] {
 }
 
 /**
- * Build human reproduction steps: windowed user actions ending on the observed
- * failure. Empty for design-mode / no-interaction reports. Deterministic.
+ * Build human reproduction steps: the full user-action trail with the observed
+ * failure marked in place, capped to the most recent MAX_STEPS. Empty for
+ * design-mode / no-interaction reports. Deterministic.
  */
 export function extractReproSteps(data: ReportData): ReproStep[] {
   const sessionStart = data.meta?.startedAt ?? 0;
-  const actions = collapseRuns(extractActions(data.events, sessionStart));
+  const actions = collapseRuns(
+    extractReproActions(data.events, sessionStart).map((a) => ({ t: a.t, text: actionToText(a) })),
+  );
   if (actions.length === 0) return [];
 
   const d = deriveDiagnostics(data);
@@ -192,8 +85,7 @@ export function extractReproSteps(data: ReportData): ReproStep[] {
 
   // Show the FULL action trail — users expect to see everything they did, not
   // only the actions before the failure. Mark the observed failure IN PLACE (at
-  // its moment) so the climax is visible without dropping later actions; cap to
-  // the most recent MAX_STEPS.
+  // its moment) so the climax is visible without dropping later actions.
   const steps: ReproStep[] = [...actions];
   if (d.severity !== 'ok' && failureT != null) {
     const obs: ReproStep = { t: failureT, text: `Observed: ${d.headline}` };

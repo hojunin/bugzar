@@ -47,6 +47,135 @@ const click = (id: number, t: number): RrwebEvent =>
 const input = (id: number, text: string, t: number): RrwebEvent =>
   ({ type: 3, timestamp: t, data: { source: 5, id, text } }) as unknown as RrwebEvent;
 
+// A design-system (mcds) radio/checkbox renders a styled control (button[role])
+// next to a hidden native <input>. One user click fires: a click on the styled
+// element + browser-synthesized click(s) on the native input + an input value-
+// change. This mirrors the real session-1782488665772 export.
+//   #10 radiogroup: #11 button[radio "일반택배"] + #12 input, #13 button[radio
+//       "배송없음"] (text via #14 span) + #15 input
+//   #20 div.flex (전체YN row): #21 button[checkbox "N"] (#22 span) + #23 input
+//   #30 div.flex (toolbar): #31 > #32 button[submit "검색"]
+const mcdsSnapshot = (): RrwebEvent =>
+  ({
+    type: 2,
+    timestamp: 0,
+    data: {
+      node: {
+        type: 1,
+        id: 1,
+        childNodes: [
+          {
+            type: 2,
+            id: 2,
+            tagName: 'BODY',
+            attributes: {},
+            childNodes: [
+              {
+                type: 2,
+                id: 10,
+                tagName: 'DIV',
+                attributes: { role: 'radiogroup' },
+                childNodes: [
+                  {
+                    type: 2,
+                    id: 11,
+                    tagName: 'BUTTON',
+                    attributes: { role: 'radio' },
+                    childNodes: [{ type: 3, id: 111, textContent: '일반택배' }],
+                  },
+                  {
+                    type: 2,
+                    id: 12,
+                    tagName: 'INPUT',
+                    attributes: { type: 'radio' },
+                    childNodes: [],
+                  },
+                  {
+                    type: 2,
+                    id: 13,
+                    tagName: 'BUTTON',
+                    attributes: { role: 'radio' },
+                    childNodes: [
+                      {
+                        type: 2,
+                        id: 14,
+                        tagName: 'SPAN',
+                        attributes: { class: 'mcds:w-20' },
+                        childNodes: [],
+                      },
+                      { type: 3, id: 131, textContent: '배송없음' },
+                    ],
+                  },
+                  {
+                    type: 2,
+                    id: 15,
+                    tagName: 'INPUT',
+                    attributes: { type: 'radio' },
+                    childNodes: [],
+                  },
+                ],
+              },
+              {
+                type: 2,
+                id: 20,
+                tagName: 'DIV',
+                attributes: { class: 'flex items-center' },
+                childNodes: [
+                  {
+                    type: 2,
+                    id: 21,
+                    tagName: 'BUTTON',
+                    attributes: { role: 'checkbox' },
+                    childNodes: [
+                      {
+                        type: 2,
+                        id: 22,
+                        tagName: 'SPAN',
+                        attributes: { class: 'mcds:w-20' },
+                        childNodes: [],
+                      },
+                      { type: 3, id: 221, textContent: 'N' },
+                    ],
+                  },
+                  {
+                    type: 2,
+                    id: 23,
+                    tagName: 'INPUT',
+                    attributes: { type: 'checkbox' },
+                    childNodes: [],
+                  },
+                ],
+              },
+              {
+                type: 2,
+                id: 30,
+                tagName: 'DIV',
+                attributes: { class: 'flex' },
+                childNodes: [
+                  {
+                    type: 2,
+                    id: 31,
+                    tagName: 'DIV',
+                    attributes: { class: 'flex' },
+                    childNodes: [
+                      {
+                        type: 2,
+                        id: 32,
+                        tagName: 'BUTTON',
+                        attributes: { type: 'submit', class: 'mcds:inline-flex' },
+                        childNodes: [{ type: 3, id: 321, textContent: '검색' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  }) as unknown as RrwebEvent;
+
 const net500: NetworkEntryPayload = {
   tFromStart: 2000,
   method: 'POST',
@@ -202,5 +331,54 @@ describe('extractReproSteps', () => {
       click(9, 1000), // Bugzar FAB click → skip
     ] as unknown as RrwebEvent[];
     expect(extractReproSteps(data(events))).toEqual([]);
+  });
+
+  it('collapses a custom radio/checkbox interaction into one Click (real mcds pattern)', () => {
+    // Each interaction below is ONE user click that rrweb records as 2-4 events
+    // (styled control + synthesized native-input clicks + value echo + a stray
+    // container click). The viewer used to show all of them; now it shows one.
+    const steps = extractReproSteps(
+      data([
+        meta('https://app.example/products'),
+        mcdsSnapshot(),
+        // 일반택배: styled button + synthesized native-input click + value echo
+        click(11, 1000),
+        click(12, 1002),
+        input(12, '1', 1006),
+        // 배송없음: click lands on the inner span → climbs to the role=radio button
+        click(14, 1700),
+        click(15, 1702),
+        input(15, '5', 1706),
+        // 전체YN checkbox: span click + native echoes + a later container-row click
+        click(22, 4000),
+        click(23, 4002),
+        input(23, 'on', 4006),
+        click(20, 4300),
+        // 검색: an imprecise container click, then the real submit button
+        click(30, 5000),
+        click(32, 5470),
+      ]),
+    );
+    expect(reproStepText(steps)).toEqual([
+      'Click [button "일반택배" — [role="radio"]]',
+      'Click [button "배송없음" — [role="radio"]]',
+      'Click [button "N" — [role="checkbox"]]',
+      'Click [button "검색" — button.mcds:inline-flex]',
+    ]);
+  });
+
+  it('never renders a radio/checkbox value-change as "Type into"', () => {
+    const text = reproStepText(
+      extractReproSteps(
+        data([
+          meta('https://app.example/products'),
+          mcdsSnapshot(),
+          click(11, 1000),
+          input(12, '1', 1006),
+        ]),
+      ),
+    );
+    expect(text.some((t) => t.startsWith('Type'))).toBe(false);
+    expect(text).toEqual(['Click [button "일반택배" — [role="radio"]]']);
   });
 });

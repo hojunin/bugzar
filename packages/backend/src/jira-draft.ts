@@ -15,6 +15,12 @@
  * popup falls back to manual entry (Phase 2 §5.7b).
  */
 
+import {
+  type ActionTarget,
+  extractReproActions,
+  type ReproAction,
+  type RrwebEvent,
+} from '@bugzar/shared';
 import type { BugDraft, DesignDraft } from './adf';
 import { redactJwt, sanitizeForAI } from './sanitize';
 
@@ -183,82 +189,22 @@ const MAX_REPRO_STEPS = 6;
 // purpose — the goal is the error code / message, not the whole payload.
 const ERROR_HINT_MAX = 120;
 
-// ── rrweb snapshot decoding ─────────────────────────────────────────
+// ── rrweb action labelling ──────────────────────────────────────────
 //
-// rrweb captures a full DOM snapshot (event.type === 2) at recording
-// start and again whenever it loses track. Each element gets a numeric
-// `id`. Later incremental events (clicks, inputs, mutations) reference
-// that id. Without an index map, an event like
-// `{ source: 2, type: 2, id: 374 }` is opaque — the AI sees "click on
-// node 374" and can't write a reproduction step. Indexing the snapshot
-// turns it into "click on <button> '필터 열기'".
-
-interface SerializedNode {
-  type?: number; // 1=Document, 2=Element, 3=Text, 4=CDATA, 5=Comment
-  id?: number;
-  tagName?: string;
-  attributes?: Record<string, string | number | boolean | null>;
-  textContent?: string;
-  childNodes?: SerializedNode[];
-}
-
-interface ElementInfo {
-  tag: string;
-  text: string;
-  // Stable identifier we can put in the prompt — `data-testid` or
-  // `aria-label` if present, else a class selector. This is what a
-  // reviewer can grep for in code when reproducing.
-  hint: string;
-}
-
-const collectInnerText = (node: SerializedNode | undefined, budget = 80): string => {
-  if (!node || budget <= 0) return '';
-  if (node.type === 3 && typeof node.textContent === 'string') {
-    return node.textContent.slice(0, budget);
-  }
-  let acc = '';
-  for (const child of node.childNodes ?? []) {
-    if (acc.length >= budget) break;
-    acc += collectInnerText(child, budget - acc.length);
-  }
-  return acc;
-};
-
-// Stable, semantic identity only. Class selectors / raw HTML are noise that
-// burns tokens and misleads the model, so we DROP them — if an element has no
-// data-testid / aria-label / role we fall back to its visible text (handled by
-// `describeTarget`), not a class soup. Returns '' when there is no stable hint.
-const buildHint = (attrs: Record<string, string | number | boolean | null> | undefined): string => {
-  if (!attrs) return '';
-  const testId = attrs['data-testid'] ?? attrs['data-test'] ?? attrs['data-cy'];
-  if (typeof testId === 'string' && testId) return `data-testid="${testId}"`;
-  const aria = attrs['aria-label'];
-  if (typeof aria === 'string' && aria) return `aria-label="${aria.slice(0, 30)}"`;
-  const role = attrs.role;
-  if (typeof role === 'string' && role) return `role="${role}"`;
+// The INTERPRETATION of raw rrweb events into normalized user actions —
+// snapshot indexing, radio/checkbox + synthesized-click de-dup, ancestry
+// collapse — is shared with the viewer in `@bugzar/shared`
+// (`extractReproActions`) so the two surfaces can't drift. Here we only turn
+// those normalized actions into the Korean, LLM-facing repro path.
+//
+// Stable, semantic identity only. `ActionTarget` carries the raw attrs; we build
+// a `data-testid` / `aria-label` / `role` hint and DROP class soup — it burns
+// tokens and misleads the model.
+const buildHint = (target: ActionTarget): string => {
+  if (target.testId) return `data-testid="${target.testId}"`;
+  if (target.ariaLabel) return `aria-label="${target.ariaLabel.slice(0, 30)}"`;
+  if (target.role) return `role="${target.role}"`;
   return '';
-};
-
-const walkSnapshot = (node: SerializedNode | undefined, index: Map<number, ElementInfo>): void => {
-  if (!node) return;
-  if (node.type === 2 && typeof node.id === 'number' && typeof node.tagName === 'string') {
-    index.set(node.id, {
-      tag: node.tagName.toLowerCase(),
-      text: collectInnerText(node, 60).trim().replace(/\s+/g, ' '),
-      hint: buildHint(node.attributes),
-    });
-  }
-  for (const child of node.childNodes ?? []) walkSnapshot(child, index);
-};
-
-const indexFullSnapshots = (events: unknown[]): Map<number, ElementInfo> => {
-  const index = new Map<number, ElementInfo>();
-  for (const ev of events) {
-    const e = ev as { type?: number; data?: { node?: SerializedNode } } | null;
-    if (e?.type !== 2) continue;
-    walkSnapshot(e.data?.node, index);
-  }
-  return index;
 };
 
 /**
@@ -272,16 +218,16 @@ const indexFullSnapshots = (events: unknown[]): Map<number, ElementInfo> => {
  * description. Square brackets are not HTML so the model passes them
  * through verbatim.
  */
-const describeTarget = (node: ElementInfo | undefined): string => {
-  if (!node) return '(알 수 없는 요소)';
-  const text = node.text ? ` "${node.text}"` : '';
-  const hint = node.hint ? ` — ${node.hint}` : '';
-  return `[${node.tag}${text}${hint}]`;
+const describeTarget = (target: ActionTarget | null): string => {
+  if (!target) return '(알 수 없는 요소)';
+  const text = target.text ? ` "${target.text}"` : '';
+  const hint = buildHint(target);
+  return `[${target.tag}${text}${hint ? ` — ${hint}` : ''}]`;
 };
 
 /** A click target is worth keeping in the repro path only if we can name it. */
-const hasIdentity = (node: ElementInfo | undefined): boolean =>
-  !!(node && (node.text || node.hint));
+const hasIdentity = (target: ActionTarget | null): boolean =>
+  !!(target && (target.text || buildHint(target)));
 
 // ── error-signal extraction (the high-value, low-noise part) ────────
 //
@@ -345,52 +291,29 @@ interface PathStep {
   isFailure: boolean;
 }
 
-const MASKED_VALUE = /^[*•·\s]+$/;
+/** Format one shared normalized action as a Korean repro-path step (or drop it). */
+const actionToStep = (a: ReproAction): PathStep | null => {
+  if (a.kind === 'navigate') {
+    return { t: a.t, text: `${shortPath(a.href)} 로 이동`, isFailure: false };
+  }
+  if (a.kind === 'type') {
+    const valuePart = a.masked
+      ? ' 에 (입력값 마스킹됨) 입력'
+      : a.value
+        ? ` 에 "${a.value}" 입력`
+        : ' 입력';
+    return { t: a.t, text: `${describeTarget(a.target)}${valuePart}`, isFailure: false };
+  }
+  // Click — drop anonymous containers we can't name (noise without identity).
+  if (!hasIdentity(a.target)) return null;
+  return { t: a.t, text: `${describeTarget(a.target)} 클릭`, isFailure: false };
+};
 
 /** Extract identifiable user actions (nav / click / input) as readable steps. */
-const buildActionTimeline = (events: unknown[], sessionStart: number): PathStep[] => {
-  const idx = indexFullSnapshots(events);
-  const steps: PathStep[] = [];
-  let lastUrl: string | undefined;
-  for (const ev of events) {
-    const e = ev as {
-      type?: number;
-      timestamp?: number;
-      data?: { href?: string; source?: number; id?: number; text?: string; type?: number };
-    } | null;
-    if (!e || typeof e.timestamp !== 'number') continue;
-    const t = e.timestamp - sessionStart;
-
-    if (e.type === 4 && typeof e.data?.href === 'string') {
-      if (e.data.href !== lastUrl) {
-        if (lastUrl !== undefined) {
-          steps.push({ t, text: `${shortPath(e.data.href)} 로 이동`, isFailure: false });
-        }
-        lastUrl = e.data.href;
-      }
-      continue;
-    }
-    if (e.type !== 3) continue;
-    const source = e.data?.source;
-    if (source === 2 && e.data?.type === 2 && typeof e.data?.id === 'number') {
-      const node = idx.get(e.data.id);
-      // Drop clicks on anonymous containers — they're noise without identity.
-      if (!hasIdentity(node)) continue;
-      steps.push({ t, text: `${describeTarget(node)} 클릭`, isFailure: false });
-    } else if (source === 5 && typeof e.data?.id === 'number') {
-      const node = idx.get(e.data.id);
-      const raw = typeof e.data?.text === 'string' ? e.data.text.slice(0, 40) : '';
-      const value = raw && MASKED_VALUE.test(raw) ? '(입력값 마스킹됨)' : raw;
-      const valuePart = value
-        ? value === '(입력값 마스킹됨)'
-          ? ` 에 ${value} 입력`
-          : ` 에 "${value}" 입력`
-        : ' 입력';
-      steps.push({ t, text: `${describeTarget(node)}${valuePart}`, isFailure: false });
-    }
-  }
-  return steps;
-};
+const buildActionTimeline = (events: unknown[], sessionStart: number): PathStep[] =>
+  extractReproActions(events as RrwebEvent[], sessionStart)
+    .map(actionToStep)
+    .filter((s): s is PathStep => s !== null);
 
 // ── failure signals (symptoms) ──────────────────────────────────────
 

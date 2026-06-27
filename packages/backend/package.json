@@ -19,6 +19,9 @@
     "test:watch": "vitest",
     "delete-report": "node ../../scripts/delete-report.mjs"
   },
+  "dependencies": {
+    "@bugzar/shared": "workspace:*"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260520.1",
     "rrweb-player": "2.0.0-alpha.20",
