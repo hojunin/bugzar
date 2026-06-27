@@ -62,4 +62,27 @@ describe('PUT/GET /pilot/r2/:key', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('hello-replay');
   });
+
+  it('GET renders the report inline (not a download) under the viewer CSP', async () => {
+    const { env } = stubR2();
+    await worker.fetch(
+      new Request('https://w.example/pilot/r2/x.html', {
+        method: 'PUT',
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<html><script>alert(1)</script>replay</html>',
+      }),
+      env,
+    );
+    const res = await worker.fetch(new Request('https://w.example/pilot/r2/x.html'), env);
+    // Inline HTML so the browser opens it directly — no forced download.
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('Content-Disposition')).toBe('inline');
+    expect(res.headers.get('Content-Disposition')).not.toBe('attachment');
+    // Under the same hardening the viewer uses at /r/:id: CSP + nosniff + no framing.
+    const csp = res.headers.get('Content-Security-Policy') ?? '';
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline'");
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+  });
 });

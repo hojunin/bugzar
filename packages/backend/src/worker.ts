@@ -525,10 +525,11 @@ const handlePilotGet = async (env: Env, key: string): Promise<Response> => {
   const obj = await env.ARTIFACTS.get(`pilot/${key}`);
   if (!obj) return new Response('not found', { status: 404, headers: CORS_HEADERS });
   const headers = new Headers(CORS_HEADERS);
-  obj.writeHttpMetadata(headers);
-  if (!headers.has('content-type')) headers.set('content-type', 'text/html; charset=utf-8');
+  obj.writeHttpMetadata(headers); // preserve cache-control from the stored object
   if (obj.httpEtag) headers.set('etag', obj.httpEtag);
-  applyAssetSecurityHeaders(headers);
+  // Render inline, but sandboxed into an opaque origin (see helper) so the
+  // attacker-influenced HTML can't act on the Worker's own origin.
+  applyPilotHtmlSecurityHeaders(headers);
   return new Response(obj.body, { headers });
 };
 
@@ -612,6 +613,25 @@ const applyAssetSecurityHeaders = (headers: Headers): void => {
     headers.set('content-type', 'text/plain; charset=utf-8');
     headers.set('Content-Disposition', 'attachment');
   }
+};
+
+/**
+ * The pilot report (PUT /pilot/r2/:key) is a self-contained replay/design HTML
+ * uploaded by the SDK. Unlike per-report assets — which are force-downloaded so
+ * stored HTML can never execute on this origin — we render the pilot report
+ * INLINE so the tester just clicks the link and sees it, instead of downloading
+ * a file and opening it from a folder.
+ *
+ * It runs under the same CSP the viewer uses at `/r/:id` (`applyReplaySecurityHeaders`):
+ * no remote scripts, never embeddable, no form posts. A true opaque-origin sandbox
+ * is NOT used because it breaks the rrweb replayer (which needs same-origin access
+ * to its own replay iframe). The Worker sets no cookies, so executing this
+ * self-contained HTML on-origin has no session to steal.
+ */
+const applyPilotHtmlSecurityHeaders = (headers: Headers): void => {
+  headers.set('content-type', 'text/html; charset=utf-8');
+  headers.set('Content-Disposition', 'inline');
+  applyReplaySecurityHeaders(headers);
 };
 
 // PR-16: tombstone for soft-deleted reports. Lives at `reports/<id>/.deleted`

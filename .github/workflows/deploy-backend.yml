@@ -1,17 +1,20 @@
-# PR-17 — Worker 자동 배포.
+# PR-17 — Worker 배포.
 #
-# main 푸시: production 배포 (`wrangler deploy`).
+# Release 발행 (`backend-v*` 태그): production 배포 (`wrangler deploy`).
+#   GitHub 에서 Release 를 만들면 태그가 발행되고 이 워크플로가 그 태그 커밋을
+#   prod 로 배포한다. main 에 머지하는 것만으로는 prod 에 나가지 않는다 — 배포는
+#   "Release 를 따는" 행위로만 일어난다.
 # PR 이벤트: preview 환경 (`wrangler deploy --env preview`) + PR 코멘트로
-# preview URL 안내. preview bucket 은 별도 (`bugzar-artifacts-preview`).
+#   preview URL 안내. preview bucket 은 별도 (`bugzar-artifacts-preview`).
+#
+# `release: published` 는 모든 Release 에 발동하므로 (SDK 의 `sdk-v*` 포함),
+# 아래 job 의 `if` 가드로 `backend-v*` 태그일 때만 prod 배포한다.
 
 name: Deploy Backend
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/backend/**'
-      - '.github/workflows/deploy-backend.yml'
+  release:
+    types: [published]
   pull_request:
     branches: [main]
     paths:
@@ -24,6 +27,10 @@ concurrency:
 
 jobs:
   deploy:
+    # PR → preview, 또는 backend-v* Release → prod. 그 외(예: sdk-v* Release)는 skip.
+    if: >-
+      github.event_name == 'pull_request' ||
+      startsWith(github.event.release.tag_name, 'backend-v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
