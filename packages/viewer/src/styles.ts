@@ -84,9 +84,19 @@ body { margin: 0; }
 
 .bugzarv-replay-outer {
   flex: 1 1 auto; min-height: 0; position: relative;
-  background: #fff; border-radius: 4px; overflow: hidden;
+  /* A1 — dark "stage" behind the replay. The mount box (.bugzarv-replay = the
+     recorded page iframe) keeps the page's own background; only the letterbox
+     around it picks up this color, so a fit-to-width gap reads as an intentional
+     video-style letterbox instead of a bright white void. */
+  background: #0f0f12; border-radius: 4px; overflow: hidden;
 }
-.bugzarv-replay-scroll { width: 100%; height: 100%; overflow: auto; }
+/* B1 — center the replay in the dark stage so the letterbox is balanced. The
+   'safe' keyword keeps the top/left reachable (not clipped) when the replay is
+   bigger than the pane and the scroll container has to scroll. */
+.bugzarv-replay-scroll {
+  width: 100%; height: 100%; overflow: auto;
+  display: flex; align-items: safe center; justify-content: safe center;
+}
 .bugzarv-replay { overflow: hidden; }
 .bugzarv-replay iframe { border: 0; }
 .bugzarv-zoom { position: absolute; bottom: 8px; right: 8px; display: flex; gap: 4px; z-index: 5; }
@@ -109,12 +119,46 @@ body { margin: 0; }
 .bugzarv-play:hover { background: #fff; }
 .bugzarv-play:active { transform: scale(0.94); }
 
+/* Playback-speed selector: a compact trigger + a pop-up menu above it. */
+.bugzarv-speed { position: relative; flex: 0 0 auto; }
+.bugzarv-speed-trigger {
+  height: 28px; min-width: 42px; padding: 0 9px; border-radius: 7px;
+  border: 1px solid #3f3f46; background: #27272a; color: #e4e4e7;
+  font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+.bugzarv-speed-trigger:hover { background: #3f3f46; }
+.bugzarv-speed-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 10;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px; min-width: 86px;
+  background: #1f1f23; border: 1px solid #3f3f46; border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.bugzarv-speed-item {
+  appearance: none; border: 0; background: transparent; color: #d4d4d8;
+  font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
+  padding: 6px 12px; border-radius: 6px; cursor: pointer; text-align: left;
+  white-space: nowrap; transition: background 0.1s, color 0.1s;
+}
+.bugzarv-speed-item:hover { background: #27272a; color: #fff; }
+.bugzarv-speed-item.is-active { color: #60a5fa; font-weight: 600; }
+
+/* Fullscreen toggle. */
+.bugzarv-fs {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 7px;
+  border: 1px solid #3f3f46; background: #27272a; color: #e4e4e7;
+  display: grid; place-items: center; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.bugzarv-fs:hover { background: #3f3f46; }
+
 /* Modern scrubber: tall stable hover zone, thin rounded track, round thumb */
 .bugzarv-scrubber {
-  position: relative; flex: 1 1 auto; min-width: 0; height: 22px;
+  position: relative; flex: 1 1 auto; min-width: 0; height: 30px;
   display: flex; align-items: center; cursor: pointer; touch-action: none; outline: none;
 }
-.bugzarv-track { position: relative; flex: 1 1 auto; height: 5px; border-radius: 999px; background: #3f3f46; }
+.bugzarv-track { position: relative; flex: 1 1 auto; height: 6px; border-radius: 999px; background: #3f3f46; }
 .bugzarv-scrubber:focus-visible .bugzarv-track { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.5); }
 .bugzarv-track-fill {
   position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
@@ -130,10 +174,18 @@ body { margin: 0; }
   position: absolute; top: -4px; bottom: -4px; width: 2px; transform: translateX(-50%);
   background: rgba(228, 228, 231, 0.45); pointer-events: none;
 }
+/* Clickable error ticks: click (or keyboard-activate) to seek to that issue.
+   The visible bar stays thin; an invisible ::after widens the hit target. */
 .bugzarv-marker {
   position: absolute; top: -3px; width: 2px; height: 11px; border-radius: 1px;
-  transform: translateX(-1px); pointer-events: none;
+  transform: translateX(-1px);
+  padding: 0; border: 0; margin: 0; appearance: none; cursor: pointer;
 }
+.bugzarv-marker::after {
+  content: ''; position: absolute; top: -5px; bottom: -5px; left: -5px; right: -5px;
+}
+.bugzarv-marker:hover { filter: brightness(1.35); }
+.bugzarv-marker:focus-visible { outline: 2px solid rgba(96, 165, 250, 0.85); outline-offset: 2px; }
 /* Non-color cue: console errors are a full tall tick, network failures a shorter
    tick with a square head — distinguishable without relying on hue (a11y, §C3). */
 .bugzarv-marker-console { background: #f87171; height: 13px; top: -4px; }

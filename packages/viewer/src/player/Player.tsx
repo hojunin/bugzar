@@ -1,6 +1,6 @@
 import type { RrwebEvent } from '@bugzar/shared';
 import type { RefObject } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ErrorMarker } from '../panels/markers';
 import { Controls } from './Controls';
 import { useReplayer } from './use-replayer';
@@ -25,11 +25,15 @@ export function Player({
 }: PlayerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   // Fit-to-width: 1 = the recorded viewport scaled to the container width; the
   // +/- buttons multiply on top of the fit (manual zoom).
   const [zoom, setZoom] = useState(1);
+  // Playback speed (drives rrweb's setConfig via the replayer handle).
+  const [speed, setSpeed] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Hooks run unconditionally (the <2-events empty state is rendered AFTER).
   const handle = useReplayer(
@@ -54,6 +58,29 @@ export function Player({
       seekRef.current = null;
     };
   }, [seekRef, handle.seek]);
+
+  const setPlaybackSpeed = useCallback(
+    (n: number) => {
+      handle.setSpeed(n);
+      setSpeed(n);
+    },
+    [handle.setSpeed],
+  );
+
+  // Fullscreen the replay stage (not the whole page) so the controls + panels go
+  // away and the replay fills the screen. Track the state to flip the button.
+  const toggleFullscreen = useCallback(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else el.requestFullscreen?.();
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   // Scale the rrweb replay to fit the container width (no horizontal scroll at
   // 1×); `zoom` multiplies on top. rrweb renders at the recorded viewport size,
@@ -114,7 +141,7 @@ export function Player({
   };
   return (
     <>
-      <div className="bugzarv-replay-outer">
+      <div ref={stageRef} className="bugzarv-replay-outer">
         <div ref={scrollRef} className="bugzarv-replay-scroll">
           <div ref={rootRef} className="bugzarv-replay" />
         </div>
@@ -146,6 +173,10 @@ export function Player({
         viewport={viewport}
         onPlayPause={onPlayPause}
         onSeek={seekTo}
+        speed={speed}
+        onSetSpeed={setPlaybackSpeed}
+        onToggleFullscreen={toggleFullscreen}
+        isFullscreen={isFullscreen}
       />
     </>
   );
