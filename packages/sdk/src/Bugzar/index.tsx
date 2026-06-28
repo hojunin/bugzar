@@ -174,7 +174,9 @@ export function Bugzar({
     injectStyles();
     setMounted(true);
     return () => {
-      // Restore page globals if unmounted mid-pick (recorder cleans up itself).
+      // Restore page globals if unmounted mid-pick. The recorder intentionally
+      // survives unmount (so recordings outlive client-side navigation), so only
+      // the picker is torn down here.
       pickRef.current?.stop();
     };
   }, []);

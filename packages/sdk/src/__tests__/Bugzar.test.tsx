@@ -37,6 +37,7 @@ vi.mock('@bugzar/capture-core', () => {
 });
 
 import { Bugzar } from '../Bugzar';
+import { __resetRecorder } from '../Bugzar/useRecorder';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -44,6 +45,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // The recording now survives unmount (it outlives client-side navigation), so
+  // a test that leaves it running would leak into the next one — reset it.
+  __resetRecorder();
   vi.useRealTimers();
 });
 
