@@ -22,3 +22,18 @@ describe('styles — motion (⑤)', () => {
     expect(style?.textContent).toMatch(/prefers-reduced-motion/);
   });
 });
+
+describe('styles — pointer events under a host modal', () => {
+  it('pins .bugzar-root to pointer-events:auto so a body{pointer-events:none} scroll-lock cannot make the widget click-transparent', () => {
+    // The toolbar portals to <body>. Host modals (Radix/Headless UI/react-remove-scroll)
+    // set body { pointer-events: none } while open; without an explicit value the root
+    // inherits none and clicks fall through to whatever is beneath it.
+    injectStyles();
+    const raw = document.getElementById('bugzar-styles')?.textContent ?? '';
+    // Strip CSS comments first — they can contain braces (e.g. an illustrative
+    // `body { pointer-events: none }`) that would break a naive block match.
+    const css = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rootBlock = css.match(/\.bugzar-root\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rootBlock).toMatch(/pointer-events:\s*auto/);
+  });
+});

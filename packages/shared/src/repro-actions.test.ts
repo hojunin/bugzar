@@ -119,6 +119,20 @@ const click = (id: number, t: number): RrwebEvent =>
   ({ type: 3, timestamp: t, data: { source: 2, type: 2, id } }) as unknown as RrwebEvent;
 const input = (id: number, text: string, t: number): RrwebEvent =>
   ({ type: 3, timestamp: t, data: { source: 5, id, text } }) as unknown as RrwebEvent;
+// An incremental DOM mutation (rrweb source 0) that mounts a subtree under an
+// existing node — how a modal/portal/dropdown appears AFTER the initial snapshot.
+const mutationAdd = (parentId: number, node: unknown, t: number): RrwebEvent =>
+  ({
+    type: 3,
+    timestamp: t,
+    data: {
+      source: 0,
+      texts: [],
+      attributes: [],
+      removes: [],
+      adds: [{ parentId, nextId: null, node }],
+    },
+  }) as unknown as RrwebEvent;
 
 describe('extractReproActions', () => {
   it('collapses a custom radio interaction (styled + native click + value echo) into one click', () => {
@@ -172,5 +186,40 @@ describe('extractReproActions', () => {
 
   it('returns [] for a no-interaction (design-mode) snapshot', () => {
     expect(extractReproActions([snapshot()], 0)).toEqual([]);
+  });
+
+  it('records a click on a control that mounts AFTER the snapshot (modal/portal)', () => {
+    // The cart sheet's "Checkout" button does not exist at record start — it mounts
+    // into a portal when the cart opens, arriving as an incremental mutation. Its
+    // click must still become a step.
+    const sheetSubtree = {
+      type: 2,
+      id: 200,
+      tagName: 'DIV',
+      attributes: { class: 'cart-sheet' },
+      childNodes: [
+        {
+          type: 2,
+          id: 201,
+          tagName: 'BUTTON',
+          attributes: { type: 'button' },
+          childNodes: [{ type: 3, id: 202, textContent: 'Checkout' }],
+        },
+      ],
+    };
+    const actions = extractReproActions(
+      [
+        snapshot(),
+        click(32, 1000), // a control present in the initial snapshot
+        mutationAdd(2, sheetSubtree, 2000), // sheet portal mounts under BODY (#2)
+        click(201, 2500), // user clicks Checkout
+      ],
+      0,
+    );
+    expect(actions.map((a) => a.kind)).toEqual(['click', 'click']);
+    expect(actions[1]).toMatchObject({
+      kind: 'click',
+      target: { tag: 'button', text: 'Checkout' },
+    });
   });
 });

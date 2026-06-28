@@ -148,12 +148,32 @@ function walkSnapshot(
   for (const child of node.childNodes ?? []) walkSnapshot(child, idx, bugzar, elementId);
 }
 
-function indexFullSnapshots(events: RrwebEvent[]): SnapshotIndex {
+function indexSnapshots(events: RrwebEvent[]): SnapshotIndex {
   const idx: SnapshotIndex = { info: new Map(), parent: new Map() };
   for (const ev of events) {
-    const e = ev as { type?: number; data?: { node?: SerializedNode } };
-    if (e?.type !== 2) continue;
-    walkSnapshot(e.data?.node, idx);
+    const e = ev as {
+      type?: number;
+      data?: {
+        node?: SerializedNode;
+        source?: number;
+        adds?: { parentId?: number; node?: SerializedNode }[];
+      };
+    };
+    // The initial (and any re-emitted) full snapshot.
+    if (e?.type === 2) {
+      walkSnapshot(e.data?.node, idx);
+      continue;
+    }
+    // Incremental DOM mutations (source 0) bring in nodes that appear AFTER the
+    // snapshot — a modal/dropdown/portal opening, route-added content, etc. Index
+    // them too; otherwise a click on anything that mounted mid-recording resolves
+    // to no known node and gets dropped from the steps.
+    if (e?.type === 3 && e.data?.source === 0 && Array.isArray(e.data.adds)) {
+      for (const add of e.data.adds) {
+        const parent = add.parentId !== undefined ? idx.info.get(add.parentId) : undefined;
+        walkSnapshot(add.node, idx, parent?.isBugzar ?? false, add.parentId);
+      }
+    }
   }
   return idx;
 }
@@ -199,7 +219,7 @@ interface PendingClick {
  * Deterministic; returns [] for a no-interaction (design-mode) report.
  */
 export function extractReproActions(events: RrwebEvent[], sessionStart: number): ReproAction[] {
-  const idx = indexFullSnapshots(events);
+  const idx = indexSnapshots(events);
   // All real click times — to spot browser-synthesized native-input clicks.
   const clickTimes: { t: number; id: number }[] = [];
   for (const ev of events) {

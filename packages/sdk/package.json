@@ -1,7 +1,7 @@
 {
   "name": "@bugzar/sdk",
   "version": "0.0.4",
-  "description": "Embeddable in-app QA session recorder — rrweb DOM + console + network + storage capture for any React frontend. Drop in <Bugzar />.",
+  "description": "Embeddable in-app QA session recorder for any React frontend.",
   "license": "Apache-2.0",
   "author": "Bugzar contributors",
   "repository": {

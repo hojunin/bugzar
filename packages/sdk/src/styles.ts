@@ -10,6 +10,13 @@ const CSS = `
 .bugzar-root {
   position: fixed;
   z-index: 2147483646;
+  /* Re-assert pointer events explicitly. The toolbar portals to <body>, so when a
+     host modal (Radix/Headless UI/react-remove-scroll …) locks the page with
+     body { pointer-events: none }, this root would otherwise inherit none — making
+     the widget click-transparent: clicks pass straight through to whatever sits
+     beneath it (and the widget's own buttons stop responding). An explicit value
+     overrides the inherited one and keeps the widget interactive under any modal. */
+  pointer-events: auto;
   display: flex;
   gap: 8px;
   align-items: center;

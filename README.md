@@ -52,14 +52,9 @@ import { Bugzar } from "@bugzar/sdk";
 
 **Jira 발행과 AI 초안 다듬기가 필요할 때만** Cloudflare Worker(R2 + Workers AI)를 배포한다. 그 외 캡처·리플레이·공유는 1단계로 충분하다.
 
-```bash
-git clone https://github.com/hojunin/bugzar && cd bugzar
-pnpm run deploy:backend   # 로그인 → R2 생성 → 뷰어 빌드 → 배포 (한 줄)
-```
+배포 한 줄(`pnpm run deploy:backend`)부터 `endpoint` 연결 · Jira 모드(서비스 계정 / per-user OAuth) · Atlassian 앱 등록 · 시크릿 설정 · 발행 확인까지 전체 절차는 별도 문서에 정리되어 있다.
 
-배포 후 출력된 `https://bugzar-backend.<sub>.workers.dev` 를 `endpoint` 로 연결하고 Jira 모드(서비스 계정 또는 per-user OAuth)를 고르면 된다.
-
-> **Atlassian 앱 등록·시크릿 설정·발행 확인까지 전체 절차 → [백엔드 + Jira 셋업 가이드](./docs/backend-setup.md)**
+> **→ [백엔드 + Jira 셋업 가이드](./docs/backend-setup.md)**
 
 ## 제공 API — `<Bugzar />` props
 
