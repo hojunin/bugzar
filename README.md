@@ -12,11 +12,7 @@ React 앱에 간단히 임베딩 가능한 QA recorder.
 
 | 녹화 버전 (버그 신고) | 디자인 버전 (의견 픽) |
 |---|---|
-| <video src="https://github.com/user-attachments/assets/f71323d3-b365-4de3-95eb-b77e586c238e"/> | <video src="https://github.com/user-attachments/assets/de526579-096b-46f4-b4e9-dcec86b480c9"/>|
-
-
-
-
+| <video src="https://github.com/user-attachments/assets/f71323d3-b365-4de3-95eb-b77e586c238e"/> | <video src="https://github.com/user-attachments/assets/7825a630-56b8-4612-a0cb-e8379f3f7cfc"/>|
 
 ## 설치
 
