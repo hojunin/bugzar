@@ -54,9 +54,10 @@ Captured data is **token-scrubbed at capture time**, before it ever leaves the p
 
 This is best-effort, **not a guarantee**: free-form bodies (custom RPC frames,
 GraphQL with inline literals) can't be auto-redacted without false positives. For
-full control, pass **`onBeforeUpload`** to scrub the whole bundle yourself before
-it is uploaded. When self-hosting, report URLs are public-by-URL — treat them
-accordingly.
+app-state you control the output via **`redactState`**; elsewhere, mask
+aggressively (**`mask`**) and avoid surfacing secrets the built-in key/JWT
+redaction can't catch. When self-hosting, report URLs are public-by-URL — treat
+them accordingly.
 
 ## Props
 
@@ -71,11 +72,10 @@ accordingly.
 | `autoHide` | `boolean` | `false` | Tuck the toolbar off the anchored edge; it slides in only while the cursor is over the corner `hoverZone`, while in use, or for 2s after. Mouse-only. |
 | `hoverZone` | `{ width?: number; height?: number }` | `{ width: 300, height: 30 }` | Size (px) of the invisible corner region you hover to reveal the auto-hidden toolbar — shrink it when the default zone overlaps your own UI. A missing axis keeps its default. Only used when `autoHide` is on. |
 | `endpoint` | `string \| { url: string; headers?: Record<string, string> }` | – | Bugzar Worker base URL — the **Jira backend only** (auth + AI draft + server-side issue creation). Set together with `jira` to enable the review drawer. Use the object form to send auth headers on every request. |
-| `onError` | `(error: Error) => void` | – | Called if the upload fails (when `endpoint` is set). |
-| `onBeforeUpload` | `(bundle: ReportBundle) => ReportBundle \| Promise<ReportBundle>` | – | Last-chance scrub of the bundle before upload. Strip secrets the built-in redaction misses. See [Privacy & redaction](#privacy--redaction). |
+| `onError` | `(error: Error) => void` | – | Called if `onExport` or a publish attempt fails. |
 | `design` | `boolean` | `true` | Show the "Pick" button for design-feedback element annotation. |
 | `onAnnotate` | `(annotations: DesignAnnotation[]) => void` | – | Called with the picked elements + notes on Done (a notification — `onExport` still produces the design HTML). |
-| `jira` | `{ projectKey: string; clientId?: string; enabled?: boolean; defaultEpicKey?: string }` | – | Enable the **review drawer** (requires `endpoint`). With `clientId` it's per-user OAuth (filed as the reviewer); with `enabled` it uses the Worker's service account. The ticket links to the `onExport` URL. See [Jira publishing](#jira-publishing-optional). |
+| `jira` | `{ clientId?: string; enabled?: boolean; defaultEpicKey?: string }` | – | Enable the **review drawer** (requires `endpoint`). With `clientId` it's per-user OAuth (filed as the reviewer); with `enabled` it uses the Worker's service account. The project is derived from the chosen Epic (`BUGZAR-123` → `BUGZAR`). The ticket links to the `onExport` URL. See [Jira publishing](#jira-publishing-optional). |
 | `onPublished` | `(result: { issueKey: string; issueUrl: string; stubbed: boolean }) => void` | – | Called after a publish attempt. `stubbed === true` means the Worker was unconfigured and **no real issue was created** — do not treat it as filed. |
 | `captureState` | `() => unknown` | – | Capture host app-state into the bundle's `state` timeline at start/stop/throttle. Each snapshot is serialized + redacted. |
 | `redactState` | `(state: unknown) => unknown` | – | Redact each state snapshot (runs after the built-in key/JWT masking). |
@@ -157,7 +157,7 @@ drop-in `onExport` that saves the HTML to disk: `<Bugzar onExport={downloadRepla
 when `jira` + `endpoint` are configured (below). The Worker (`endpoint`) is the
 **Jira backend only** — it never hosts reports.
 
-> **Running your own Jira backend?** See **[Self-hosting guide](../../docs/self-hosting-sdk.md)**
+> **Running your own Jira backend?** See the **[backend + Jira setup guide](../../docs/backend-setup.md)**
 > — deploy the Cloudflare Worker (Workers AI + Jira) and wire the SDK in ~5 minutes.
 
 ## Jira publishing (optional)
@@ -168,7 +168,7 @@ Jira issue for you:
 ```tsx
 <Bugzar
   endpoint="https://bugzar-backend.<your-subdomain>.workers.dev"
-  jira={{ enabled: true, projectKey: 'BUGZAR', defaultEpicKey: 'BUGZAR-1' }}
+  jira={{ enabled: true, defaultEpicKey: 'BUGZAR-1' }}
   onExport={async (blob, meta) => uploadToYourStorage(`qa/${meta.startedAt}.html`, blob)}
   onPublished={({ issueKey, issueUrl, stubbed }) => {
     if (!stubbed) window.open(issueUrl); // a real issue was filed
@@ -201,7 +201,7 @@ the ticket is filed **as them** — no shared service account.
 ```tsx
 <Bugzar
   endpoint="https://bugzar-backend.<your-subdomain>.workers.dev"
-  jira={{ clientId: 'YOUR_ATLASSIAN_OAUTH_CLIENT_ID', projectKey: 'BUGZAR' }}
+  jira={{ clientId: 'YOUR_ATLASSIAN_OAUTH_CLIENT_ID', defaultEpicKey: 'BUGZAR-1' }}
 />
 ```
 
@@ -221,8 +221,8 @@ only the public `clientId` is a prop; the token exchange runs in the Worker.
    `wrangler secret put ATLASSIAN_CLIENT_SECRET`.
 3. Pass the same client id as `jira.clientId`.
 
-> Reviewers must have permission to create issues in `projectKey` on a Jira site
-> their account can access.
+> Reviewers must have permission to create issues in the target project (derived
+> from the chosen Epic) on a Jira site their account can access.
 
 ## Headless engine (`useBugzar`)
 

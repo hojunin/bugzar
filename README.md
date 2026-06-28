@@ -5,7 +5,7 @@
 
 React 앱에 간단히 임베딩 가능한 QA recorder.
 
-- **버그 신고** — 녹화 시작/정지로 DOM·콘솔(스택)·fetch/XHR·storage·Web Vitals 캡처 → 재현 절차 자동 합성
+- **버그 신고** — 녹화 시작/정지로 DOM·콘솔(스택)·fetch/XHR·storage·Web Vitals·Resource Timing·시스템 정보 캡처 → 재현 절차 자동 합성. SPA 라우팅(클라이언트 네비게이션)으로 컴포넌트가 언마운트돼도 녹화가 끊기지 않는다
 - **디자인 의견** — 페이지 위 element 픽 → 메모 → selector·컴포넌트명이 붙은 구조화 annotation
 
 ## 시연 영상
@@ -68,12 +68,14 @@ pnpm run deploy:backend   # 로그인 → R2 생성 → 뷰어 빌드 → 배포
 | Prop | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|---|---|
 | `onExport` | `(blob, meta) => Promise<string \| void>` | 선택 | – | 빌드된 self-contained 리플레이 HTML 수신 → 본인 스토리지(S3/R2/…)에 올리고 public URL 반환. 정지·디자인 픽 완료 시 발화(`meta.mode`로 구분) |
-| `autoHide` | `boolean` | 선택 | `false` | 툴바 자동 숨김 — 코너 hotspot 에 커서 올릴 때만 노출, 사용 중엔 고정 |
+| `autoHide` | `boolean` | 선택 | `false` | 툴바를 코너 밖으로 숨김 — 코너 `hoverZone` 에 커서가 들어올 때 / 사용 중(녹화·픽·업로드·드로어) / 사용 후 2초간만 노출. 마우스 hover 전용 |
+| `hoverZone` | `{ width?; height? }` | 선택 | `{ width: 300, height: 30 }` | `autoHide` 시 툴바를 불러내는 보이지 않는 코너 영역 크기(px). 기본 영역이 본인 UI 와 겹치면 줄인다 |
 | `endpoint` | `string \| { url; headers? }` | **Jira 시 필수** | – | Worker base URL (**Jira 백엔드 전용**). `jira` 와 함께 설정 시 검토 드로어 활성 |
-| `jira` | `{ projectKey; enabled?; clientId?; defaultEpicKey? }` | **Jira 시 필수** | – | Jira 발행 설정. `enabled` = 서비스 계정 / `clientId` = per-user OAuth |
+| `jira` | `{ enabled?; clientId?; defaultEpicKey? }` | **Jira 시 필수** | – | Jira 발행 설정. `enabled` = 서비스 계정 / `clientId` = per-user OAuth. 프로젝트는 선택한 Epic 키에서 자동 도출(`BUGZAR-123` → `BUGZAR`) |
 | `onStart` | `() => void` | 선택 | – | 녹화 시작 시 호출 |
 | `mask` | `boolean` | 선택 | `true` | 모든 텍스트 input 마스킹 (password 는 항상) |
 | `position` | `'bottom-right' \| 'bottom-left' \| 'top-right' \| 'top-left'` | 선택 | `'bottom-right'` | 툴바 위치 |
+| `offset` | `number \| { x?; y? }` | 선택 | `20` | 앵커된 코너 모서리로부터의 inset(px). 숫자는 양축 동일, `{ x, y }` 는 축별 지정(생략 축은 20). 툴바·검토 드로어에 모두 적용 |
 | `theme` | `'light' \| 'dark' \| 'auto'` | 선택 | `'auto'` | 컬러 테마 |
 | `design` | `boolean` | 선택 | `true` | 디자인 의견용 "Pick" 버튼 표시 |
 | `onAnnotate` | `(annotations: DesignAnnotation[]) => void` | 선택 | – | 디자인 픽 완료 시 annotation 전달 |
