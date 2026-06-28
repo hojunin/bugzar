@@ -5,10 +5,8 @@
 
 React 앱에 간단히 임베딩 가능한 QA recorder.
 
-- **버그 신고** — 녹화 시작/정지로 DOM·콘솔(스택)·fetch/XHR·storage·Web Vitals·Resource Timing·시스템 정보 캡처 → 재현 절차 자동 합성. SPA 라우팅(클라이언트 네비게이션)으로 컴포넌트가 언마운트돼도 녹화가 끊기지 않는다
+- **버그 신고** — DOM·콘솔(스택)·fetch/XHR·Web Vitals·Resource Timing·시스템 정보 캡처 → 재현 절차 자동 합성.
 - **디자인 의견** — 페이지 위 element 픽 → 메모 → selector·컴포넌트명이 붙은 구조화 annotation
-
-## 시연 영상
 
 | 녹화 버전 (버그 신고) | 디자인 버전 (의견 픽) |
 |---|---|
@@ -16,15 +14,14 @@ React 앱에 간단히 임베딩 가능한 QA recorder.
 
 ## 설치
 
-### 1단계 — 빠른 설치
-
-정지 시 `onExport` 가 self-contained 리플레이 HTML(blob)을 넘겨준다. 받아서 어떻게 쓰는지는 자유 — **아래 둘 다 Bugzar 백엔드 없이 동작한다.**
-
 ```bash
 npm install @bugzar/sdk
 ```
 
-**A. 로컬 파일로 저장** — 번들된 `downloadReplay` 가 HTML 을 바로 파일로 떨군다. 더블클릭하면 오프라인에서 열린다.
+**A. 로컬 파일로 저장**
+
+1. 녹화/디자인 입력 정지 시 `onExport` 가 리플레이 HTML(blob)을 넘겨준다. 받아서 html을 넘겨주거나 업로드하여 공유한다.
+2. 번들된 `downloadReplay` 가 HTML 을 바로 파일로 떨군다. 더블클릭하면 오프라인에서 열린다.
 
 ```tsx
 import { Bugzar, downloadReplay } from "@bugzar/sdk";
@@ -32,7 +29,7 @@ import { Bugzar, downloadReplay } from "@bugzar/sdk";
 <Bugzar onExport={downloadReplay} />;
 ```
 
-**B. 정적 호스트에 올려 URL 로 공유** — 같은 blob 을 본인 스토리지(S3 · R2 · GitHub Pages …)에 올리고 public URL 을 반환하면, 그 URL 이 곧 공유용 리플레이 링크다. (리플레이 호스팅엔 Worker 가 필요 없다 — `endpoint` 의 Worker 는 Jira 발행 전용.)
+**B. 정적 호스트에 올려 URL 로 공유** — 같은 blob 을 본인 스토리지(S3 · R2 · GitHub Pages …)에 올리고 public URL 을 반환하면, 그 URL 이 곧 공유용 리플레이 링크다.
 
 ```tsx
 import { Bugzar } from "@bugzar/sdk";
@@ -45,8 +42,6 @@ import { Bugzar } from "@bugzar/sdk";
   }}
 />;
 ```
-
-우하단 플로팅 **QA** 버튼 → 녹화 → 정지 시 `onExport` 가 발화한다.
 
 ### 2단계 — 백엔드 + Jira (선택)
 
