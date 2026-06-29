@@ -1,5 +1,6 @@
 import type { CSSProperties, RefObject } from 'react';
 import { getStrings } from '../i18n';
+import { ResultChip, type ResultState } from './ResultChip';
 
 type Position = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 type Theme = 'light' | 'dark' | 'auto';
@@ -45,9 +46,12 @@ interface ToolbarProps {
   revealed: boolean;
   collapsed: boolean;
   rootRef: RefObject<HTMLDivElement | null>;
+  /** Post-capture result (share link / downloaded) → replaces the idle buttons. */
+  result: ResultState | null;
   onStart: () => void;
   onStop: () => void;
   onPick: () => void;
+  onDismissResult: () => void;
 }
 
 /** The floating toolbar: REC pill while recording, an uploading indicator, or the
@@ -64,9 +68,11 @@ export function Toolbar({
   revealed,
   collapsed,
   rootRef,
+  result,
   onStart,
   onStop,
   onPick,
+  onDismissResult,
 }: ToolbarProps) {
   const t = getStrings();
   return (
@@ -90,6 +96,8 @@ export function Toolbar({
           <span className="bugzar-fab-dot" />
           <span className="bugzar-fab-label">{t.uploading}</span>
         </output>
+      ) : result ? (
+        <ResultChip result={result} onDismiss={onDismissResult} />
       ) : (
         <>
           <button

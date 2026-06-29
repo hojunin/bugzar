@@ -244,6 +244,29 @@ const CSS = `
 }
 .bugzar-uploaded-link:hover { border-color: var(--bugzar-primary); }
 
+/* ── post-capture result chip (no-Jira path, #22) — neutral classes only, never
+   .bugzar-fab/.bugzar-pill, so the press guard leaves the controls alone. ── */
+.bugzar-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 6px 0 12px; height: 40px; border-radius: 20px;
+  border: 1px solid var(--bugzar-border); background: var(--bugzar-bg); color: var(--bugzar-fg);
+  box-shadow: var(--bugzar-shadow); font-size: 13px; font-weight: 600;
+  animation: bugzar-fade-in 0.18s ease both;
+}
+.bugzar-chip .bugzar-uploaded-link { align-self: auto; }
+.bugzar-chip-label { white-space: nowrap; }
+.bugzar-chip-copy {
+  padding: 6px 10px; border: 1px solid var(--bugzar-border); border-radius: 8px;
+  background: transparent; color: var(--bugzar-primary);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.bugzar-chip-copy:hover { border-color: var(--bugzar-primary); }
+.bugzar-chip-dismiss {
+  padding: 4px 6px; border: none; border-radius: 6px; background: transparent;
+  color: var(--bugzar-fg); opacity: 0.6; font-size: 16px; line-height: 1; cursor: pointer;
+}
+.bugzar-chip-dismiss:hover { opacity: 1; }
+
 /* ── widget terminal states (③) ── */
 .bugzar-terminal {
   display: inline-flex; align-items: center; gap: 8px;

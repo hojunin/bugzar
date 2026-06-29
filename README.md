@@ -97,6 +97,8 @@ import { Bugzar } from "@bugzar/sdk";
 
 > 플로팅 툴바 대신 직접 버튼을 만들고 싶으면 헤드리스 훅 `useBugzar`, 백엔드 없이 파일 저장은 `downloadReplay`, 프로그래매틱 픽은 `startDesignPick` 도 export 된다. 상세 타입·예시는 [SDK README](./packages/sdk/README.md).
 
+> **Jira 없이도 결과를 잃지 않는다:** `jira`/`endpoint`를 안 켜도 캡처 결과는 버려지지 않는다 — `onExport`가 URL을 반환하면 툴바에 "열기·복사" 칩이 뜨고, `onExport`가 없으면 self-contained HTML이 바로 다운로드된다.
+
 > **열린 컴포넌트 디자인 픽:** Pick 버튼을 누를 때, 열려 있는 outside-click 컴포넌트(Select·Modal·Popover·Drawer)는 닫히지 않고 **스냅샷에 열린 상태로 캡처**된다. 단 이는 스냅샷 충실도만 보장한다 — 라이브로 닫히는 동안 진행하는 **Select 내부 다중 옵션 픽**, **Tooltip(hover/blur로 닫힘)**, 그리고 호스트가 *capture-phase* 또는 vanilla 동기 DOM 제거로 dismiss하는 경우는 아직 지원하지 않는다(동결 오버레이 백스톱 후속). 자세한 내용은 [설계 문서](./docs/issue-21-preserve-open-component-design.md) §6.
 
 ---

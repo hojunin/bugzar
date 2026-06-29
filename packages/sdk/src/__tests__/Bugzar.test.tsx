@@ -36,8 +36,17 @@ vi.mock('@bugzar/capture-core', () => {
   };
 });
 
+// Stop now builds + delivers a self-contained HTML even with no sink (#22), so the
+// lazy export module and the download floor must be stubbed so it stays fast/deterministic.
+vi.mock('@bugzar/sdk/export', () => ({
+  exportReportHtml: vi.fn(async () => new Blob(['<!doctype html>'], { type: 'text/html' })),
+  exportDesignHtml: vi.fn(async () => new Blob(['<!doctype html>'], { type: 'text/html' })),
+}));
+vi.mock('../download', () => ({ downloadReplay: vi.fn() }));
+
 import { Bugzar } from '../Bugzar';
 import { __resetRecorder } from '../Bugzar/useRecorder';
+import { downloadReplay } from '../download';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -48,6 +57,7 @@ afterEach(() => {
   // The recording now survives unmount (it outlives client-side navigation), so
   // a test that leaves it running would leak into the next one — reset it.
   __resetRecorder();
+  vi.mocked(downloadReplay).mockClear();
   vi.useRealTimers();
 });
 
@@ -67,13 +77,17 @@ describe('Bugzar', () => {
     expect(screen.getByLabelText('Stop recording')).toBeTruthy();
   });
 
-  it('stop returns to the FAB (no sink configured)', () => {
+  it('stop with no sink downloads the capture instead of discarding it (#22)', async () => {
     render(<Bugzar />);
 
     fireEvent.click(screen.getByLabelText('Start recording'));
     fireEvent.click(screen.getByLabelText('Stop recording'));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
-    expect(screen.getByLabelText('Start recording')).toBeTruthy();
+    expect(vi.mocked(downloadReplay)).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.bugzar-chip')?.textContent ?? '').toMatch(/downloaded/i);
   });
 });
 
@@ -129,12 +143,18 @@ describe('Bugzar autoHide', () => {
     expect(revealed()).toBe('true');
   });
 
-  it('after a use ends, holds the idle toolbar for 2s then collapses', () => {
-    render(<Bugzar autoHide />);
+  it('after a use ends (no result chip), holds the idle toolbar for 2s then collapses', async () => {
+    // onExport returns void → host self-handled → no result chip, so inUse drops
+    // and only the grace window can hold the toolbar open.
+    render(<Bugzar autoHide onExport={async () => undefined} />);
     move(cornerX(), cornerY());
     fireEvent.click(screen.getByLabelText('Start recording'));
     move(0, 0); // away, so only in-use/grace can keep it open
     fireEvent.click(screen.getByLabelText('Stop recording'));
+    // Settle the async delivery WITHOUT advancing the grace timer (microtasks only).
+    await act(async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    });
     expect(revealed()).toBe('true'); // 2s grace holds it
     act(() => {
       vi.advanceTimersByTime(2000);

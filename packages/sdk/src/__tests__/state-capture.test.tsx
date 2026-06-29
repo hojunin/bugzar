@@ -46,11 +46,11 @@ describe('Bugzar — app-state capture wiring (M6)', () => {
   });
 
   // v1: offline HTML is built only when `onExport` is set, so inlining is gated on it.
-  it('does not inline assets with no output sink (bare Bugzar)', () => {
+  it('inlines assets for bare Bugzar so the download floor is self-contained (#22)', () => {
     render(<Bugzar />);
     fireEvent.click(screen.getByLabelText('Start recording'));
     expect(createRecorderMock).toHaveBeenCalledWith(
-      expect.objectContaining({ inlineAssets: false }),
+      expect.objectContaining({ inlineAssets: true }),
     );
   });
 

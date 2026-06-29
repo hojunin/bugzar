@@ -31,6 +31,8 @@ describe('downloadReplay', () => {
     expect(createURL).toHaveBeenCalledWith(blob);
     expect(click).toHaveBeenCalledOnce();
     expect(downloaded).toBe('bugzar-session-1717000000000.html');
+    // The revoke is deferred one tick (avoids racing large saves on old Safari).
+    await new Promise((r) => setTimeout(r, 0));
     expect(revokeURL).toHaveBeenCalledWith('blob:mock'); // no leaked object URL
   });
 

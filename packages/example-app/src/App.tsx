@@ -1,4 +1,4 @@
-import { Bugzar, downloadReplay } from '@bugzar/sdk';
+import { Bugzar } from '@bugzar/sdk';
 import { Loader2, PackageOpen, SlidersHorizontal } from 'lucide-react';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -243,7 +243,23 @@ export function App() {
 
       <Toaster />
 
-      <Bugzar onExport={downloadReplay} />
+      <Bugzar
+        autoHide
+        endpoint={'https://bugzar-backend.hjinn.workers.dev'}
+        jira={{ clientId: 'iKR0gISeJRmq8BsTcihAmlOsIzAQoDkQ' }}
+        onExport={async (blob, meta) => {
+          const res = await fetch(
+            `https://bugzar-backend.hjinn.workers.dev/pilot/r2/${meta.mode}-${meta.startedAt}.html`,
+            {
+              method: 'PUT',
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+              body: blob,
+            },
+          );
+          const { url } = (await res.json()) as { url: string };
+          return url;
+        }}
+      />
     </div>
   );
 }

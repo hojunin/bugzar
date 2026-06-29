@@ -17,7 +17,7 @@ export interface UseBugzarOptions {
   mask?: boolean;
   onStart?: () => void;
   /** Receive the built self-contained replay HTML to upload to your own storage. */
-  onExport?: (blob: Blob, meta: ExportMeta) => Promise<string | void>;
+  onExport?: (blob: Blob, meta: ExportMeta) => Promise<string | undefined>;
   onError?: (error: Error) => void;
   captureState?: () => unknown;
   redactState?: (state: unknown) => unknown;

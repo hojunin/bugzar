@@ -27,6 +27,8 @@ export interface Strings {
   designReady: string;
   open: string;
   share: string;
+  copied: string;
+  downloaded: string;
   // picker
   pickHint: string;
   notePlaceholder: (tag: string) => string;
@@ -94,6 +96,8 @@ const EN: Strings = {
   designReady: 'Design report ready',
   open: 'Open',
   share: 'Share',
+  copied: 'Copied',
+  downloaded: 'Downloaded',
   pickHint: 'Click an element to leave design feedback',
   notePlaceholder: (tag) => `Note for <${tag}>…`,
   figmaPlaceholder: 'Figma link (optional)',
@@ -161,6 +165,8 @@ const KO: Strings = {
   designReady: '디자인 리포트 준비됨',
   open: '열기',
   share: '공유',
+  copied: '복사됨',
+  downloaded: '다운로드됨',
   pickHint: '디자인 피드백을 남길 요소를 클릭하세요',
   notePlaceholder: (tag) => `<${tag}> 메모…`,
   figmaPlaceholder: 'Figma 링크 (선택)',

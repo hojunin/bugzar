@@ -17,5 +17,7 @@ export async function downloadReplay(blob: Blob, meta: ExportMeta): Promise<void
   a.href = url;
   a.download = `bugzar-${meta.mode}-${meta.startedAt}.html`;
   a.click();
-  URL.revokeObjectURL(url);
+  // Defer the revoke one tick: large inlined-HTML blobs now route through this
+  // path more often, and an immediate revoke has raced large saves on old Safari.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

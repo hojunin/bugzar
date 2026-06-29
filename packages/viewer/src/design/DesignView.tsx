@@ -8,6 +8,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Replayer } from 'rrweb';
 import { SystemInfoPanel } from '../panels/SystemInfoPanel';
 import type { DesignElement, ReportData, ReportMeta } from '../report/types';
+import { expandScrollContainers } from './expand-scroll-containers';
+import { formatAll, formatForAI } from './format-for-ai';
+
+// Re-exported so the existing test can import it from './DesignView'.
+export { expandScrollContainers } from './expand-scroll-containers';
 
 export interface DesignViewProps {
   elements: DesignElement[];
@@ -18,86 +23,6 @@ export interface DesignViewProps {
   system?: ReportData['system'];
   meta?: ReportMeta | null;
   vitals?: WebVitals;
-}
-
-/** A structured, paste-into-an-AI description of one annotated element. */
-function formatForAI(el: DesignElement, i: number): string {
-  const lines = [`[Design QA #${i + 1}]`];
-  lines.push(`Element: <${el.tagName}${el.cssClasses ? ` class="${el.cssClasses}"` : ''}>`);
-  lines.push(`Selector: ${el.selector}`);
-  if (el.componentName) lines.push(`Component: ${el.componentName}`);
-  if (el.textContent) lines.push(`Text: "${el.textContent}"`);
-  if (el.attributes && Object.keys(el.attributes).length > 0) {
-    const attrs = Object.entries(el.attributes)
-      .map(([k, v]) => `${k}="${v}"`)
-      .join(' ');
-    lines.push(`Attributes: ${attrs}`);
-  }
-  lines.push(`Fix requested: ${el.userNote || '(none)'}`);
-  if (el.figmaUrl) lines.push(`Figma: ${el.figmaUrl}`);
-  return lines.join('\n');
-}
-
-function formatAll(elements: DesignElement[], pageUrl?: string): string {
-  const header = pageUrl ? `Design QA report — ${pageUrl}` : 'Design QA report';
-  return [header, '', elements.map((el, i) => formatForAI(el, i)).join('\n\n')].join('\n');
-}
-
-/**
- * Un-clip the captured page so each annotated element lays out and is visible.
- * App shells scroll inside a container (`overflow:auto`) under a `100vh` /
- * `overflow:hidden` ancestor, sometimes wrapped in a `position:fixed` panel — all
- * of which clip below-the-fold content and leave post-scroll pins over a blank
- * area. We free the document root, then walk ONLY the ancestor chain of each
- * annotated element and neutralize the clipping/fixed boxes there. Touching every
- * element instead would balloon unrelated floating widgets (e.g. the TanStack
- * Query devtools button) once their size constraint is removed.
- */
-export function expandScrollContainers(doc: Document, selectors: string[]): void {
-  const win = doc.defaultView;
-  if (!win) return;
-  // Let the document root itself grow to its content.
-  for (const root of [doc.documentElement, doc.body]) {
-    if (!root) continue;
-    root.style.setProperty('height', 'auto', 'important');
-    root.style.setProperty('min-height', '0', 'important');
-    root.style.setProperty('max-height', 'none', 'important');
-    root.style.setProperty('overflow', 'visible', 'important');
-  }
-  const seen = new Set<Element>();
-  for (const sel of selectors) {
-    let node: Element | null = null;
-    try {
-      node = doc.querySelector(sel);
-    } catch {
-      node = null; // unsupported selector — skip
-    }
-    for (
-      let el = node?.parentElement ?? null;
-      el && el !== doc.documentElement && el !== doc.body;
-      el = el.parentElement
-    ) {
-      if (seen.has(el)) break; // shared ancestors already handled
-      seen.add(el);
-      let cs: CSSStyleDeclaration;
-      try {
-        cs = win.getComputedStyle(el);
-      } catch {
-        continue;
-      }
-      const h = el as HTMLElement;
-      // A clipping/scrolling box → expand it so its content lays out fully.
-      if (/auto|scroll|hidden|clip/.test(`${cs.overflow} ${cs.overflowX} ${cs.overflowY}`)) {
-        h.style.setProperty('overflow', 'visible', 'important');
-        h.style.setProperty('height', 'auto', 'important');
-        h.style.setProperty('max-height', 'none', 'important');
-      }
-      // Fixed/sticky ancestors don't add to the document height — drop into flow.
-      if (cs.position === 'fixed' || cs.position === 'sticky') {
-        h.style.setProperty('position', 'static', 'important');
-      }
-    }
-  }
 }
 
 /** Imageless fallback (old reports / snapshot capture failed). */

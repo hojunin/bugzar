@@ -3,119 +3,21 @@
 import { captureSnapshot, collectSystemInfo } from '@bugzar/capture-core';
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { downloadReplay } from '../download';
 import { type PickerHandle, startDesignPick } from '../picker/picker';
-import type {
-  DesignAnnotation,
-  ExportMeta,
-  JiraConfig,
-  PublishResult,
-  ReportBundle,
-  RrwebEvent,
-  SystemInfo,
-} from '../public-types';
+import type { ExportMeta, RrwebEvent, SystemInfo } from '../public-types';
 import { ReviewDrawer } from '../ReviewDrawer';
 import { injectStyles } from '../styles';
-import type { Endpoint } from '../upload';
 import { buildDesignBlob, buildReplayBlob } from './export-blobs';
+import type { ResultState } from './ResultChip';
 import { Toolbar } from './Toolbar';
+import type { BugzarProps, DrawerState } from './types';
 import { useAutoHide } from './useAutoHide';
 import { useRecorder } from './useRecorder';
 
-/** Open review-drawer session: a `bug` (bundle) or `design` (annotations) issue. */
-type DrawerState =
-  | { mode: 'bug'; url?: string; bundle: ReportBundle }
-  | { mode: 'design'; url?: string; annotations: DesignAnnotation[] };
-
-export interface BugzarProps {
-  /** Fired when recording starts. */
-  onStart?: () => void;
-  /** Mask every text input (passwords are always masked regardless). Default true. */
-  mask?: boolean;
-  /**
-   * Toolbar corner the widget anchors to.
-   *
-   * @default 'bottom-right'
-   */
-  position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
-  /**
-   * Inset, in pixels, from the two anchored corner edges (the `position` corner).
-   * Pass a single number to inset both axes equally, or `{ x, y }` to set them
-   * independently — an omitted axis falls back to `20`. Applies to both the
-   * toolbar and the review drawer; when `autoHide` is on, the tucked-away toolbar
-   * also slides fully past this inset so it sits off-screen.
-   *
-   * @default 20
-   * @example offset={32}               // 32px from both anchored edges
-   * @example offset={{ x: 24, y: 88 }} // clear a bottom-right action button
-   */
-  offset?: number | { x?: number; y?: number };
-  /**
-   * Auto-hide the toolbar so it isn't always-on chrome. When `true` it stays
-   * tucked off the anchored edge and slides into view only while the cursor is
-   * inside the corner `hoverZone`, while the widget is in use (recording /
-   * annotating / uploading / review drawer), or for a 2s grace period after use.
-   * Reveal is mouse-only by design (geometric hover, not focus/touch). When
-   * `false` the toolbar is always visible (classic behavior, unchanged).
-   *
-   * @default false
-   */
-  autoHide?: boolean;
-  /**
-   * Size, in pixels, of the invisible corner region you hover to reveal the
-   * auto-hidden toolbar. Shrink it when the default zone overlaps your own UI
-   * (e.g. a chat bubble or CTA sharing that corner). `{ width, height }`; an
-   * omitted axis keeps its default. Only used when `autoHide` is `true`.
-   *
-   * @default { width: 300, height: 30 }
-   * @example hoverZone={{ width: 80, height: 16 }}
-   */
-  hoverZone?: { width?: number; height?: number };
-  /** Color theme. Default 'auto' (follows prefers-color-scheme). */
-  theme?: 'light' | 'dark' | 'auto';
-  /**
-   * Receive the built self-contained replay HTML so you can upload it to your own
-   * storage (S3/R2/…). Return the public URL the report is now reachable at. Fires
-   * on recording stop AND design-pick finish (`meta.mode` distinguishes). Active on
-   * the no-`endpoint` path.
-   */
-  onExport?: (blob: Blob, meta: ExportMeta) => Promise<string | void>;
-  /**
-   * Bugzar Worker base URL (e.g. `https://bugzar-backend.<sub>.workers.dev`),
-   * or `{ url, headers? }`. The Worker is the **Jira backend only** (auth + AI
-   * draft + issue creation); set it together with `jira` to enable the review
-   * drawer. Web sharing is via `onExport` → your storage, not the Worker.
-   */
-  endpoint?: Endpoint;
-  /** Fired if `onExport` or a publish attempt fails. */
-  onError?: (error: Error) => void;
-  /** Show the "Pick" button for design-feedback element annotation. Default true. */
-  design?: boolean;
-  /**
-   * Fired when the user finishes a design pick with the annotated elements.
-   * When omitted (and no `endpoint`), finishing a Pick builds an offline HTML
-   * design report and offers it via the share chip.
-   */
-  onAnnotate?: (annotations: DesignAnnotation[]) => void;
-  /**
-   * Jira publish config. When `jira.enabled` AND `endpoint` are set, stopping
-   * uploads the bundle and opens a review drawer that files a Jira issue via the
-   * Worker's service account (the browser never holds an Atlassian token). Without
-   * both, there is no drawer — the callbacks/upload path runs as usual.
-   */
-  jira?: JiraConfig;
-  /**
-   * Fired after a publish attempt. `result.stubbed === true` means the Worker was
-   * unconfigured and NO real issue was created — do not treat it as filed.
-   */
-  onPublished?: (result: PublishResult) => void;
-  /**
-   * Capture host app-state into the bundle's `state` timeline at start + stop +
-   * throttle. Each snapshot is serialized + redacted. Omit to capture none.
-   */
-  captureState?: () => unknown;
-  /** Redact each state snapshot (runs after the built-in key/JWT masking). */
-  redactState?: (state: unknown) => unknown;
-}
+// BugzarProps moved to ./types; re-exported so `index.ts` and consumers keep
+// importing it from the component module.
+export type { BugzarProps } from './types';
 
 /**
  * Embeddable Bugzar. Drop `<Bugzar />` anywhere in a React tree; a
@@ -148,13 +50,16 @@ export function Bugzar({
   const [uploading, setUploading] = useState(false);
   const [picking, setPicking] = useState(false);
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [result, setResult] = useState<ResultState | null>(null);
   const pickRef = useRef<PickerHandle | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // HTML export needs assets inlined at capture time (offline replay). We build the
-  // offline HTML only on the no-backend, no-`endpoint` path; inline assets only then
-  // (it's the heavy bit and pointless otherwise).
-  const wantsHtml = !endpoint && !!onExport;
+  // HTML export needs assets inlined at capture time (offline replay). On every
+  // no-`endpoint` path we now deliver a self-contained HTML — uploaded via
+  // `onExport` OR downloaded locally as the floor (#22) — so inline whenever there's
+  // no Jira backend. The endpoint/Jira path keeps assets un-inlined (the Worker
+  // viewer reconstructs the replay), so this stays false there.
+  const wantsHtml = !endpoint;
 
   const {
     recording,
@@ -216,32 +121,70 @@ export function Bugzar({
     };
   }, []);
 
-  // Build the offline HTML and hand it to the consumer to upload; resolves to the
-  // public URL they return (used as the Jira ticket's replay link, when set).
-  const exportBlob = useCallback(
-    async (produce: () => Promise<Blob>, meta: ExportMeta): Promise<string | void> => {
-      if (!onExport) return undefined;
-      return onExport(await produce(), meta);
+  // Surface a failure: prefer the host's handler, else don't swallow it silently.
+  const reportErr = useCallback(
+    (err: unknown) => {
+      const e = err instanceof Error ? err : new Error(String(err));
+      if (onError) onError(e);
+      else console.error('[bugzar]', e);
     },
-    [onExport],
+    [onError],
+  );
+
+  // Deliver a finished capture without ever discarding it (#22). Build the offline
+  // HTML once and hold it, then route on the RESOLVED sink value:
+  //   jira on        → review drawer (HOLD), linked to the onExport URL if any
+  //   url string     → share chip the host can open/copy
+  //   void/empty     → host self-handled (e.g. downloadReplay) → show nothing
+  //   reject (jiraOff)→ download the held blob as the floor + report + chip
+  //   no onExport    → download the held blob as the floor + chip
+  // A build throw leaves no blob to download → report only.
+  const deliver = useCallback(
+    async (produce: () => Promise<Blob>, meta: ExportMeta, toDrawer: (url?: string) => void) => {
+      setUploading(true);
+      let blob: Blob;
+      try {
+        blob = await produce();
+      } catch (err) {
+        reportErr(err);
+        setUploading(false);
+        return;
+      }
+      const jiraOn = !!((jira?.clientId || jira?.enabled) && endpoint);
+      const chipMode = meta.mode === 'design' ? 'design' : 'bug';
+      try {
+        const url = onExport ? await onExport(blob, meta) : undefined;
+        if (jiraOn) toDrawer(typeof url === 'string' && url ? url : undefined);
+        else if (typeof url === 'string' && url) setResult({ kind: 'link', mode: chipMode, url });
+        else if (!onExport) {
+          downloadReplay(blob, meta);
+          setResult({ kind: 'downloaded', mode: chipMode });
+        }
+        // else: onExport returned void/empty → host self-handled → show nothing.
+      } catch (err) {
+        reportErr(err);
+        // Reject on the jiraOff path → fall back to a local download so the capture
+        // is never lost. The jira path keeps its existing reject behavior (no drawer).
+        if (!jiraOn) {
+          downloadReplay(blob, meta);
+          setResult({ kind: 'downloaded', mode: chipMode });
+        }
+      } finally {
+        setUploading(false);
+      }
+    },
+    [onExport, endpoint, jira, reportErr],
   );
 
   const stop = useCallback(() => {
     const bundle = stopRecorder();
     if (!bundle) return;
-
-    // Build the offline HTML → `onExport` returns the share URL. When jira+endpoint
-    // is configured, open the review drawer (HOLD) linking to that URL.
-    const jiraOn = !!((jira?.clientId || jira?.enabled) && endpoint);
-    if (!onExport && !jiraOn) return; // no sink — capture discarded
-    setUploading(true);
-    exportBlob(() => buildReplayBlob(bundle), { ...bundle.meta, mode: 'session' })
-      .then((url) => {
-        if (jiraOn) setDrawer({ mode: 'bug', bundle, ...(url ? { url } : {}) });
-      })
-      .catch((err) => onError?.(err instanceof Error ? err : new Error(String(err))))
-      .finally(() => setUploading(false));
-  }, [endpoint, jira, onExport, onError, exportBlob, stopRecorder]);
+    deliver(
+      () => buildReplayBlob(bundle),
+      { ...bundle.meta, mode: 'session' },
+      (url) => setDrawer({ mode: 'bug', bundle, ...(url ? { url } : {}) }),
+    );
+  }, [stopRecorder, deliver]);
 
   const startPick = useCallback(() => {
     if (pickRef.current?.isActive()) return;
@@ -274,8 +217,6 @@ export function Bugzar({
         setPicking(false);
         // onAnnotate always fires — no data loss, even in the jira flow.
         onAnnotate?.(annotations);
-        const jiraOn = !!((jira?.clientId || jira?.enabled) && endpoint);
-        if (!onExport && !jiraOn) return; // no sink
         const now = Date.now();
         const designMeta: ExportMeta = {
           url: typeof location !== 'undefined' ? location.href : '',
@@ -289,23 +230,22 @@ export function Bugzar({
           durationMs: 0,
           mode: 'design',
         };
-        setUploading(true);
-        exportBlob(() => buildDesignBlob(annotations, snapshot, system), designMeta)
-          .then((url) => {
-            if (jiraOn) setDrawer({ mode: 'design', annotations, ...(url ? { url } : {}) });
-          })
-          .catch((err) => onError?.(err instanceof Error ? err : new Error(String(err))))
-          .finally(() => setUploading(false));
+        deliver(
+          () => buildDesignBlob(annotations, snapshot, system),
+          designMeta,
+          (url) => setDrawer({ mode: 'design', annotations, ...(url ? { url } : {}) }),
+        );
       },
       onCancel: () => {
         pickRef.current = null;
         setPicking(false);
       },
     });
-  }, [onAnnotate, jira, endpoint, onExport, onError, exportBlob, wantsHtml, mask]);
+  }, [onAnnotate, deliver, wantsHtml, mask]);
 
-  // "In use" → pin the toolbar open regardless of hover (the fix rule).
-  const inUse = recording || uploading || picking || !!drawer;
+  // "In use" → pin the toolbar open regardless of hover (the fix rule). The result
+  // chip counts: autoHide must not tuck it away before the user opens/copies it.
+  const inUse = recording || uploading || picking || !!drawer || !!result;
   const { revealed, collapsed } = useAutoHide({
     autoHide,
     mounted,
@@ -363,9 +303,11 @@ export function Bugzar({
       revealed={revealed}
       collapsed={collapsed}
       rootRef={rootRef}
+      result={result}
       onStart={start}
       onStop={stop}
       onPick={startPick}
+      onDismissResult={() => setResult(null)}
     />,
     document.body,
   );

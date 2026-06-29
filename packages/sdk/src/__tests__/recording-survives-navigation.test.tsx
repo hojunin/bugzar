@@ -41,6 +41,14 @@ vi.mock('@bugzar/capture-core', () => {
   };
 });
 
+// Stop now builds + downloads a self-contained HTML even with no sink (#22) — stub
+// the lazy export module and the download floor so this lifecycle test stays fast.
+vi.mock('@bugzar/sdk/export', () => ({
+  exportReportHtml: vi.fn(async () => new Blob()),
+  exportDesignHtml: vi.fn(async () => new Blob()),
+}));
+vi.mock('../download', () => ({ downloadReplay: vi.fn() }));
+
 import { Bugzar } from '../Bugzar';
 
 // <Bugzar/> nested under a routed page: changing `route` flips the key so React
@@ -66,7 +74,7 @@ afterEach(() => {
 });
 
 describe('recording survives client-side navigation', () => {
-  it('keeps recording across an unmount→remount and does not stop on unmount', () => {
+  it('keeps recording across an unmount→remount and does not stop on unmount', async () => {
     const { rerender } = render(<RoutedApp route="/a" />);
 
     fireEvent.click(screen.getByLabelText('Start recording'));
@@ -83,7 +91,11 @@ describe('recording survives client-side navigation', () => {
     // An explicit Stop still works and is the only thing that stops it.
     fireEvent.click(screen.getByLabelText('Stop recording'));
     expect(stopSpy).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText('Start recording')).toBeTruthy();
+    // Recording has ended (stop now hands the capture to the async delivery path).
+    expect(screen.queryByLabelText('Stop recording')).toBeNull();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
   });
 
   it('resumes the elapsed timer after the remount (no reset to 0:00)', () => {
