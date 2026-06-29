@@ -35,9 +35,12 @@ crons = ["0 2 * * *"]
 # Workers Analytics Engine — telemetry sink. The dataset is free up to
 # 100k writes/day. The endpoint gracefully degrades to console.log when
 # the binding is absent.
-[[analytics_engine_datasets]]
-binding = "BUGZAR_ANALYTICS"
-dataset = "bugzar"
+# DISABLED: Analytics Engine is not enabled on this account (deploy err 10089).
+# Telemetry falls back to console (env.BUGZAR_ANALYTICS is optional). Re-enable
+# this binding after turning on Analytics Engine in the Cloudflare dashboard.
+# [[analytics_engine_datasets]]
+# binding = "BUGZAR_ANALYTICS"
+# dataset = "bugzar"
 
 # Public host the Worker advertises for artifact URLs. By default we proxy
 # `/artifacts/:key` through the Worker itself, so this is just the Worker's
@@ -92,8 +95,9 @@ binding = "AI"
 binding = "ARTIFACTS"
 bucket_name = "bugzar-artifacts-preview"
 preview_bucket_name = "bugzar-artifacts-preview"
-[[env.preview.analytics_engine_datasets]]
-binding = "BUGZAR_ANALYTICS"
-dataset = "bugzar_preview"
+# DISABLED: see the production analytics_engine_datasets note above.
+# [[env.preview.analytics_engine_datasets]]
+# binding = "BUGZAR_ANALYTICS"
+# dataset = "bugzar_preview"
 [env.preview.vars]
 PUBLIC_HOST = ""
