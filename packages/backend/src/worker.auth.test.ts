@@ -81,7 +81,7 @@ describe('Phase B — upload token (S-3)', () => {
         method: 'PUT',
         headers: {
           'content-type': 'application/json',
-          'content-length': String(11 * 1024 * 1024), // > 10 MB JSON cap
+          'content-length': String(26 * 1024 * 1024), // > 25 MB network cap (#20)
         },
         body: '{}',
       }),
@@ -110,12 +110,13 @@ describe('Phase B — upload token (S-3)', () => {
         async delete(): Promise<void> {},
       }) as unknown as R2Bucket;
 
-    // 11 MB streamed in 1 MB chunks, with NO content-length header — the
-    // header check (overSizeLimit) sees nothing; the byte counter must catch it.
+    // 26 MB streamed in 1 MB chunks, with NO content-length header — the header
+    // check (overSizeLimit) sees nothing; the byte counter must catch it at the
+    // 25 MB network cap (#20).
     const oneMB = new Uint8Array(1024 * 1024);
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        for (let i = 0; i < 11; i++) controller.enqueue(oneMB);
+        for (let i = 0; i < 26; i++) controller.enqueue(oneMB);
         controller.close();
       },
     });

@@ -26,6 +26,7 @@
  * extension builds use the /reports/ flow.
  */
 
+import { NETWORK_ASSET_CAP_BYTES } from '@bugzar/shared';
 import { jsonToBugAdf, jsonToDesignAdf, type SelectedElementLite } from './adf';
 import type { DesignElementInput, DraftInputArtifacts } from './jira-draft';
 import { buildBugStub, buildDesignStub, generateBugDraft, generateDesignDraft } from './jira-draft';
@@ -220,10 +221,11 @@ const uploadAuthorized = async (req: Request, env: Env, reportId: string): Promi
 /** Reject oversized writes (S-3 / I-3). Per-asset byte ceiling. */
 const MAX_ASSET_BYTES: Partial<Record<AssetName, number>> & { default: number } = {
   default: 10 * 1024 * 1024, // JSON assets
+  network: NETWORK_ASSET_CAP_BYTES, // #20: large response bodies — only this asset needs >10MB
   video: 100 * 1024 * 1024,
   screenshot: 5 * 1024 * 1024,
 };
-const assetCap = (asset?: AssetName): number =>
+export const assetCap = (asset?: AssetName): number =>
   (asset && MAX_ASSET_BYTES[asset]) || MAX_ASSET_BYTES.default;
 
 /** Fast reject when the client *declares* an over-cap Content-Length. */

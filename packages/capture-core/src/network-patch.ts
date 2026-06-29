@@ -1,4 +1,9 @@
-import { type NetworkEntryPayload, sanitizeNetworkBody } from '@bugzar/shared';
+import {
+  NETWORK_BODY_MAX_BYTES,
+  NETWORK_TOTAL_BUDGET_BYTES,
+  type NetworkEntryPayload,
+  sanitizeNetworkBody,
+} from '@bugzar/shared';
 
 /**
  * Monkey-patches window.fetch and XMLHttpRequest in the page's MAIN-world
@@ -61,6 +66,52 @@ const stringifyBody = async (body: unknown): Promise<string | null> => {
   }
 };
 
+const TRUNCATED_MARK = '…[truncated]';
+const BUDGET_MARK = '…[budget exceeded]';
+const encoder = new TextEncoder();
+
+// Cumulative captured body bytes for the current session. Reset on install (#20).
+let capturedBodyBytes = 0;
+
+/** Reset the session network budget — test hook + called on install. */
+export const __resetNetworkBudget = (): void => {
+  capturedBodyBytes = 0;
+};
+
+/**
+ * Cap a single network body (request OR response) before it's persisted (#20):
+ *  1. per-body truncation to NETWORK_BODY_MAX_BYTES UTF-8 bytes (codepoint-safe),
+ *  2. per-session total budget — once spent, drop the body to a marker (the entry
+ *     + metadata are still kept), bounding tab memory and keeping the network
+ *     asset under the backend cap,
+ *  3. the existing credential redaction (sanitizeNetworkBody) on the kept body.
+ * Counting bytes (not chars) keeps the client cap dimensionally consistent with
+ * the backend asset cap so non-ASCII bodies don't 413 the whole session.
+ */
+export const capBody = (text: string | null, contentType: string | null): string | null => {
+  if (text == null) return null;
+  if (capturedBodyBytes >= NETWORK_TOTAL_BUDGET_BYTES) return BUDGET_MARK;
+  const bytes = encoder.encode(text);
+  let body = text;
+  let truncated = false;
+  let kept = bytes.length;
+  if (bytes.length > NETWORK_BODY_MAX_BYTES) {
+    // Slice on a byte boundary; a split trailing codepoint decodes to U+FFFD,
+    // which we trim so the kept body stays valid.
+    body = new TextDecoder('utf-8', { fatal: false })
+      .decode(bytes.subarray(0, NETWORK_BODY_MAX_BYTES))
+      .replace(/�+$/, '');
+    truncated = true;
+    kept = NETWORK_BODY_MAX_BYTES; // conservative budget charge for the clipped body
+  }
+  if (capturedBodyBytes + kept > NETWORK_TOTAL_BUDGET_BYTES) {
+    capturedBodyBytes = NETWORK_TOTAL_BUDGET_BYTES; // mark the session budget spent
+    return BUDGET_MARK;
+  }
+  capturedBodyBytes += kept;
+  return sanitizeNetworkBody(truncated ? `${body}${TRUNCATED_MARK}` : body, contentType);
+};
+
 type Options = {
   sessionStart: number;
   onEntry: (entry: NetworkEntryPayload) => void;
@@ -73,6 +124,7 @@ let originalXHRSetRequestHeader: typeof XMLHttpRequest.prototype.setRequestHeade
 
 export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void => {
   if (originalFetch) return; // idempotent
+  __resetNetworkBudget(); // fresh session → fresh body budget
 
   // ── fetch ──
   originalFetch = window.fetch.bind(window);
@@ -88,9 +140,9 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
       // Clone to leave original intact for the page's fetch path.
       const cloned = req.clone();
       const text = await cloned.text();
-      // Redact form PII (passwords/tokens/api keys) BEFORE the body leaves
-      // the page — keeps cleartext out of IDB and R2. See sanitize-network-body.
-      requestBody = sanitizeNetworkBody(text || null, req.headers.get('content-type'));
+      // Cap + redact form PII (passwords/tokens/api keys) BEFORE the body leaves
+      // the page — keeps cleartext out of IDB and R2. See capBody / sanitize-network-body.
+      requestBody = capBody(text || null, req.headers.get('content-type'));
     } catch {
       requestBody = null;
     }
@@ -103,10 +155,9 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
       let responseBody: string | null = null;
       try {
         const text = await cloned.text();
-        const truncated = text.length > 100_000 ? `${text.slice(0, 100_000)}…[truncated]` : text;
         // Servers sometimes echo credentials back (login response with
-        // session_id, OAuth code → token responses). Mask before persist.
-        responseBody = sanitizeNetworkBody(truncated, res.headers.get('content-type'));
+        // session_id, OAuth code → token responses). capBody truncates + redacts.
+        responseBody = capBody(text, res.headers.get('content-type'));
       } catch {
         responseBody = null;
       }
@@ -211,7 +262,7 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
             rh['CONTENT-TYPE'] ??
             Object.entries(rh).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ??
             null;
-          this.__bugzar.requestBody = sanitizeNetworkBody(s, ct);
+          this.__bugzar.requestBody = capBody(s, ct);
         }
       });
 
@@ -223,12 +274,9 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
         let responseBody: string | null = null;
         try {
           if (this.responseType === '' || this.responseType === 'text') {
-            const text = this.responseText;
-            const truncated =
-              text.length > 100_000 ? `${text.slice(0, 100_000)}…[truncated]` : text;
-            // Same threat as fetch response — login/OAuth flows echo
-            // credentials back.
-            responseBody = sanitizeNetworkBody(truncated, this.getResponseHeader('content-type'));
+            // Same threat as fetch response — login/OAuth flows echo credentials
+            // back. capBody truncates + redacts.
+            responseBody = capBody(this.responseText, this.getResponseHeader('content-type'));
           } else if (this.response != null) {
             responseBody = `<${this.responseType}>`;
           }
