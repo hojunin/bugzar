@@ -1,6 +1,6 @@
 {
   "name": "@bugzar/sdk",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Embeddable in-app QA session recorder for any React frontend.",
   "license": "Apache-2.0",
   "author": "Bugzar contributors",
