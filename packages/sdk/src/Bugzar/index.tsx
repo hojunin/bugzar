@@ -181,6 +181,41 @@ export function Bugzar({
     };
   }, []);
 
+  // Keep an open outside-click-dismissable host component (Select / Modal /
+  // Popover / Drawer) OPEN through the FAB press, so startPick's captureSnapshot
+  // freezes the actual open screen instead of the dismissed one (#21). The host's
+  // dismiss is typically a document bubble-phase pointer listener; a document
+  // capture-phase guard runs first and stops the press from ever reaching it.
+  // Scoped to the toolbar controls (.bugzar-fab/.bugzar-pill) only — the
+  // ReviewDrawer shares .bugzar-root and we must not swallow its form inputs.
+  // The FAB's React onClick (delegated at the portal root, document.body) is a
+  // separate event and still fires startPick. Only covers the common bubble /
+  // focus-dismiss case; capture-phase or sync-vanilla dismissals need the
+  // deferred freeze-overlay backstop (see docs/issue-21-…-design.md §6).
+  useEffect(() => {
+    const onFab = (e: Event): boolean =>
+      !!(e.target as Element | null)?.closest?.('.bugzar-fab, .bugzar-pill');
+    // pointerdown: stop propagation only. preventDefault here can swallow the
+    // activating click on touch, so we never cancel it.
+    const onPointerDown = (e: Event): void => {
+      if (onFab(e)) e.stopPropagation();
+    };
+    // mousedown (mouse-only): also preventDefault to block the focus-steal that
+    // would trigger a focusout/blur dismiss — never suppresses a touch tap.
+    const onMouseDown = (e: Event): void => {
+      if (onFab(e)) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('mousedown', onMouseDown, true);
+    };
+  }, []);
+
   // Build the offline HTML and hand it to the consumer to upload; resolves to the
   // public URL they return (used as the Jira ticket's replay link, when set).
   const exportBlob = useCallback(
