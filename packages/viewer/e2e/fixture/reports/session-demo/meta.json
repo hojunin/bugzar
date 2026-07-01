@@ -1,0 +1,11 @@
+{
+  "url": "https://app.example/checkout",
+  "userAgent": "Mozilla/5.0 (e2e fixture)",
+  "viewport": { "width": 1280, "height": 720 },
+  "startedAt": 1718000000000,
+  "endedAt": 1718000002000,
+  "durationMs": 2000,
+  "schemaVersion": 1,
+  "mode": "session",
+  "source": "sdk"
+}

@@ -1,0 +1,10 @@
+packages:
+  - "packages/*"
+  - "packages/sdk/example"
+
+# Single source of truth for the rrweb family so workspace packages can't drift
+# apart (e.g. @rrweb/types alpha.18 vs alpha.20). Bump here to move them together.
+catalog:
+  rrweb: 2.0.0-alpha.20
+  "@rrweb/types": 2.0.0-alpha.20
+  rrweb-player: 2.0.0-alpha.20

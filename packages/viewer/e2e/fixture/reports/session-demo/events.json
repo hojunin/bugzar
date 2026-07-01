@@ -1,0 +1,50 @@
+[
+  {
+    "type": 4,
+    "data": { "href": "https://app.example/checkout", "width": 1280, "height": 720 },
+    "timestamp": 1718000000000
+  },
+  {
+    "type": 2,
+    "data": {
+      "node": {
+        "type": 0,
+        "id": 1,
+        "childNodes": [
+          { "type": 1, "id": 2, "name": "html", "publicId": "", "systemId": "" },
+          {
+            "type": 2,
+            "id": 3,
+            "tagName": "html",
+            "attributes": {},
+            "childNodes": [
+              { "type": 2, "id": 4, "tagName": "head", "attributes": {}, "childNodes": [] },
+              {
+                "type": 2,
+                "id": 5,
+                "tagName": "body",
+                "attributes": {},
+                "childNodes": [
+                  {
+                    "type": 2,
+                    "id": 6,
+                    "tagName": "h1",
+                    "attributes": {},
+                    "childNodes": [{ "type": 3, "id": 7, "textContent": "Checkout" }]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "initialOffset": { "left": 0, "top": 0 }
+    },
+    "timestamp": 1718000000000
+  },
+  {
+    "type": 3,
+    "data": { "source": 0, "texts": [], "attributes": [], "removes": [], "adds": [] },
+    "timestamp": 1718000002000
+  }
+]

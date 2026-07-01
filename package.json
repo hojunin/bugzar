@@ -1,0 +1,21 @@
+{
+  "name": "bugzar",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.4",
+    "typescript": "5.7.2"
+  }
+}

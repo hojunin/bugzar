@@ -1,0 +1,19 @@
+[
+  {
+    "selector": ".btn-buy",
+    "tagName": "BUTTON",
+    "textContent": "Buy now",
+    "cssClasses": "btn-buy primary",
+    "rect": { "x": 10, "y": 20, "width": 120, "height": 40 },
+    "componentName": "BuyButton",
+    "userNote": "wrong color — should be brand green"
+  },
+  {
+    "selector": ".price",
+    "tagName": "SPAN",
+    "textContent": "$19.99",
+    "cssClasses": "price",
+    "rect": { "x": 10, "y": 80, "width": 60, "height": 20 },
+    "userNote": "misaligned with the title"
+  }
+]

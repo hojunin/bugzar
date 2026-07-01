@@ -1,0 +1,31 @@
+[
+  {
+    "tFromStart": 100,
+    "method": "GET",
+    "url": "/api/cart",
+    "status": 200,
+    "durationMs": 45,
+    "requestHeaders": { "accept": "application/json", "x-request-id": "cart-001" },
+    "requestBody": null,
+    "responseHeaders": { "content-type": "application/json", "cache-control": "no-store" },
+    "responseBody": "{\"items\":[{\"sku\":\"ABC-1\",\"qty\":2}],\"total\":3998}",
+    "error": null,
+    "initiator": "fetch"
+  },
+  {
+    "tFromStart": 1600,
+    "method": "POST",
+    "url": "/api/checkout",
+    "status": 500,
+    "durationMs": 320,
+    "requestHeaders": {
+      "content-type": "application/json",
+      "authorization": "Bearer ***REDACTED***"
+    },
+    "requestBody": "{\"cartId\":\"c-77\",\"paymentToken\":\"***REDACTED***\"}",
+    "responseHeaders": { "content-type": "application/json", "x-trace-id": "9f2c1a" },
+    "responseBody": "{\"error\":\"payment_declined\",\"message\":\"Card was declined by issuer\"}",
+    "error": null,
+    "initiator": "fetch"
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "name": "@bugzar/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./postmessage-bridge": "./src/postmessage-bridge.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rrweb/types": "catalog:",
+    "uuid": "11.0.3",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/uuid": "10.0.0",
+    "happy-dom": "15.11.7",
+    "jsdom": "25.0.1",
+    "vitest": "2.1.8"
+  }
+}

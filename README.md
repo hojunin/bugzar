@@ -1,0 +1,103 @@
+# Bugzar
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@bugzar/sdk.svg)](https://www.npmjs.com/package/@bugzar/sdk)
+
+React 앱에 간단히 임베딩 가능한 QA recorder.
+
+- **버그 신고** — DOM·콘솔(스택)·fetch/XHR·Web Vitals·Resource Timing·시스템 정보 캡처 → 재현 절차 자동 합성.
+- **디자인 의견** — 페이지 위 element 픽 → 메모 → selector·컴포넌트명이 붙은 구조화 annotation
+
+| 녹화 버전 (버그 신고) | 디자인 버전 (의견 픽) |
+|---|---|
+| <video src="https://github.com/user-attachments/assets/f71323d3-b365-4de3-95eb-b77e586c238e"/> | <video src="https://github.com/user-attachments/assets/7825a630-56b8-4612-a0cb-e8379f3f7cfc"/>|
+
+## 설치
+
+```bash
+npm install @bugzar/sdk
+```
+
+**A. 로컬 파일로 저장**
+
+프롭 없이 그냥 마운트하면 된다. 녹화/디자인 픽이 끝나면 self-contained 리플레이 HTML 이 바로 파일로 다운로드되고(더블클릭하면 오프라인에서 열린다) 툴바에 결과 칩이 뜬다.
+
+```tsx
+import { Bugzar } from "@bugzar/sdk";
+
+<Bugzar />;
+```
+
+> 이 자동 다운로드는 번들된 `downloadReplay` 를 폴백으로 쓴 것이다. 커스텀 `onExport` 안에서 같은 다운로드를 재사용하고 싶을 때만 `downloadReplay` 를 직접 import 한다 (`import { Bugzar, downloadReplay } from "@bugzar/sdk"`).
+
+**B. 정적 호스트에 올려 URL 로 공유** — 같은 blob 을 본인 스토리지(S3 · R2 · GitHub Pages …)에 올리고 public URL 을 반환하면, 그 URL 이 곧 공유용 리플레이 링크다.
+
+```tsx
+import { Bugzar } from "@bugzar/sdk";
+
+<Bugzar
+  onExport={async (blob, meta) => {
+    const key = `qa/${meta.mode}-${meta.startedAt}.html`;
+    await uploadToYourStorage(key, blob); // S3/R2 presigned PUT 등
+    return publicUrl(key); // ← 반환한 URL 이 공유 링크 (Jira 발행 시 티켓에도 첨부됨)
+  }}
+/>;
+```
+
+### 2단계 — 백엔드 + Jira (선택)
+
+**Jira 발행과 AI 초안 다듬기가 필요할 때만** 별도 백엔드 서비스가 필요하다(`endpoint` prop 으로 연결). 그 외 캡처·리플레이·공유는 1단계로 충분하다. 백엔드 구현/배포는 이 저장소에 포함되지 않는다.
+
+## 리포트 구조
+
+`onExport` 가 넘겨주는 self-contained HTML 이 곧 리포트다 — 백엔드 없이 더블클릭만으로 열린다. 구성은 다음과 같다.
+
+- **진단 바(상단)** — 캡처된 URL, 에러·실패 요청 개수 칩(클릭 시 해당 시점으로 점프), 그리고 **`Copy for AI` 버튼**
+- **리플레이 플레이어** — rrweb 화면 재생. 재생 위치가 사이드바와 동기화된다
+- **데이터 사이드바(탭)** — `Steps`(자동 합성된 재현 절차, 행 클릭 시 그 순간으로 점프) · `Console`(에러 + 스택) · `Network`(요청/응답, 실패 요청은 본문 포함) · `Resources` · `System Info` (+ 호스트가 `captureState` 를 넘기면 `State`)
+
+### 🤖 `Copy for AI` — AI 로 바로 고치기
+
+진단 바의 **`Copy for AI`** 버튼은 **이 버그를 고치기 위한 프롬프트**를 클립보드에 복사한다. Cursor·Claude Code 같은 코딩 에이전트에 그대로 붙여넣으면 된다. 증상 우선으로 큐레이션된 Markdown 한 덩어리이며, 다음을 토큰 예산 안에서 담는다.
+
+1. **증상** — 무엇이 깨졌는지 (헤드라인 + URL)
+2. **실패 요청** — 요청 페이로드 + 응답 본문 (5xx 우선)
+3. **에러 + 스택** — 콘솔 에러와 상위 스택 프레임
+4. **재현 절차** — 자동 합성된 사용자 행동 순서
+5. **확인 지점(Where to look)** — 추측이 아닌 *관측된* 사실만 (실패 엔드포인트 · 연관 콘솔 에러 · 마지막 행동)
+6. **환경** — URL · 세션 길이 등
+
+값은 캡처 시점에 redact 되고(Authorization·Cookie·JWT 등), 복사 직전 한 번 더 검열을 거친다. `Console`·`Network` 탭의 개별 항목에도 각각 `Copy for AI` 가 있어 특정 에러·요청 하나만 떼어 붙여넣을 수도 있다.
+
+## 제공 API — `<Bugzar />` props
+
+모두 선택값이다. 콜백만 넘기면 백엔드 없이 동작하고, `endpoint` + `jira` 를 더하면 검토 드로어·Jira 발행이 켜진다.
+
+| Prop | 타입 | 필수 | 기본값 | 설명 |
+|---|---|---|---|---|
+| `onExport` | `(blob, meta) => Promise<string \| void>` | 선택 | – | 빌드된 self-contained 리플레이 HTML 수신 → 본인 스토리지(S3/R2/…)에 올리고 public URL 반환. 정지·디자인 픽 완료 시 발화(`meta.mode`로 구분) |
+| `autoHide` | `boolean` | 선택 | `false` | 툴바를 코너 밖으로 숨김 — 코너 `hoverZone` 에 커서가 들어올 때 / 사용 중(녹화·픽·업로드·드로어) / 사용 후 2초간만 노출. 마우스 hover 전용 |
+| `hoverZone` | `{ width?; height? }` | 선택 | `{ width: 300, height: 30 }` | `autoHide` 시 툴바를 불러내는 보이지 않는 코너 영역 크기(px). 기본 영역이 본인 UI 와 겹치면 줄인다 |
+| `endpoint` | `string \| { url; headers? }` | **Jira 시 필수** | – | Worker base URL (**Jira 백엔드 전용**). `jira` 와 함께 설정 시 검토 드로어 활성 |
+| `jira` | `{ enabled?; clientId?; defaultEpicKey? }` | **Jira 시 필수** | – | Jira 발행 설정. `enabled` = 서비스 계정 / `clientId` = per-user OAuth. 프로젝트는 선택한 Epic 키에서 자동 도출(`BUGZAR-123` → `BUGZAR`) |
+| `onStart` | `() => void` | 선택 | – | 녹화 시작 시 호출 |
+| `mask` | `boolean` | 선택 | `true` | 모든 텍스트 input 마스킹 (password 는 항상) |
+| `position` | `'bottom-right' \| 'bottom-left' \| 'top-right' \| 'top-left'` | 선택 | `'bottom-right'` | 툴바 위치 |
+| `offset` | `number \| { x?; y? }` | 선택 | `20` | 앵커된 코너 모서리로부터의 inset(px). 숫자는 양축 동일, `{ x, y }` 는 축별 지정(생략 축은 20). 툴바·검토 드로어에 모두 적용 |
+| `theme` | `'light' \| 'dark' \| 'auto'` | 선택 | `'auto'` | 컬러 테마 |
+| `design` | `boolean` | 선택 | `true` | 디자인 의견용 "Pick" 버튼 표시 |
+| `onAnnotate` | `(annotations: DesignAnnotation[]) => void` | 선택 | – | 디자인 픽 완료 시 annotation 전달 |
+| `onPublished` | `(result: PublishResult) => void` | 선택 | – | 발행 시도 후 호출. `stubbed === true` 면 실제 발행 안 됨 |
+| `onError` | `(error: Error) => void` | 선택 | – | `onExport`·발행 실패 시 |
+| `captureState` | `() => unknown` | 선택 | – | 호스트 app-state 를 번들 timeline 에 캡처 (직렬화 + redact) |
+| `redactState` | `(state) => unknown` | 선택 | – | 각 state 스냅샷 redact (내장 키/JWT 마스킹 이후) |
+
+> 플로팅 툴바 대신 직접 버튼을 만들고 싶으면 헤드리스 훅 `useBugzar`, 백엔드 없이 파일 저장은 `downloadReplay`, 프로그래매틱 픽은 `startDesignPick` 도 export 된다. 상세 타입·예시는 [SDK README](./packages/sdk/README.md).
+
+> **Jira 없이도 결과를 잃지 않는다:** `jira`/`endpoint`를 안 켜도 캡처 결과는 버려지지 않는다 — `onExport`가 URL을 반환하면 툴바에 "열기·복사" 칩이 뜨고, `onExport`가 없으면 self-contained HTML이 바로 다운로드된다.
+
+> **열린 컴포넌트 디자인 픽:** Pick 버튼을 누를 때, 열려 있는 outside-click 컴포넌트(Select·Modal·Popover·Drawer)는 닫히지 않고 **스냅샷에 열린 상태로 캡처**된다. 단 이는 스냅샷 충실도만 보장한다 — 라이브로 닫히는 동안 진행하는 **Select 내부 다중 옵션 픽**, **Tooltip(hover/blur로 닫힘)**, 그리고 호스트가 *capture-phase* 또는 vanilla 동기 DOM 제거로 dismiss하는 경우는 아직 지원하지 않는다(동결 오버레이 백스톱 후속). 자세한 내용은 [설계 문서](./docs/issue-21-preserve-open-component-design.md) §6.
+
+---
+
+**더 보기** — SDK 통합·props·privacy: [packages/sdk/README.md](./packages/sdk/README.md) · 기여: [CONTRIBUTING.md](./CONTRIBUTING.md) · 보안: [SECURITY.md](./SECURITY.md)
