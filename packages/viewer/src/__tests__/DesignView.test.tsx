@@ -180,4 +180,18 @@ describe('figmaUrl XSS guard (#1)', () => {
     render(<DesignView elements={evil} events={SNAPSHOT} />);
     expect(screen.queryByRole('link', { name: /Figma/ })).toBeNull();
   });
+
+  // Review follow-up: pins the INTENTIONAL pass-through of relative URLs —
+  // isSafeUrl resolves them against the page, so they can only ever be
+  // http/https and can't carry an executable scheme. If this ever needs
+  // tightening to absolute-only, breaking this test makes it a deliberate call.
+  it('still renders a link for a relative figmaUrl (resolves to http/https)', () => {
+    const rel: DesignElement[] = [
+      { ...(elements[1] as DesignElement), figmaUrl: '/files/design-spec' },
+    ];
+    render(<DesignView elements={rel} events={SNAPSHOT} />);
+    expect(screen.getByRole('link', { name: /Figma/ }).getAttribute('href')).toBe(
+      '/files/design-spec',
+    );
+  });
 });
