@@ -144,3 +144,30 @@ describe('worker-proxied Jira calls', () => {
     expect(sites[0]?.id).toBe('c1');
   });
 });
+
+// #2: the long-lived refresh token must never be persisted to localStorage
+// (any same-origin script could exfiltrate it). It lives in memory for the tab;
+// localStorage holds refreshToken:null and loadSession re-attaches from memory.
+describe('refresh token is never persisted (#2)', () => {
+  beforeEach(() => clearSession()); // reset the module-scope in-memory holder
+
+  it('saveSession redacts the refresh token out of localStorage', () => {
+    saveSession(session({ refreshToken: 'SUPER-SECRET-REFRESH' }));
+    const raw = localStorage.getItem('bugzar:atlassian') as string;
+    expect(raw).not.toContain('SUPER-SECRET-REFRESH'); // absent from storage entirely
+    expect(JSON.parse(raw).tokens.refreshToken).toBeNull();
+  });
+
+  it('loadSession re-attaches the in-memory refresh token in the same tab', () => {
+    saveSession(session({ refreshToken: 'r-mem' }));
+    expect(loadSession()?.tokens.refreshToken).toBe('r-mem'); // from memory, not storage
+    expect(loadSession()?.tokens.accessToken).toBe('a-tok');
+  });
+
+  it('clearSession drops both the in-memory token and the storage key', () => {
+    saveSession(session({ refreshToken: 'r-mem' }));
+    clearSession();
+    expect(localStorage.getItem('bugzar:atlassian')).toBeNull();
+    expect(loadSession()).toBeNull();
+  });
+});
