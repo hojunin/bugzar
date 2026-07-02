@@ -1,4 +1,4 @@
-import { type ConsoleEntry, redactFreeText } from '@bugzar/shared';
+import { type ConsoleEntry, redactFreeText, sanitizeNetworkBody } from '@bugzar/shared';
 
 type Level = ConsoleEntry['level'];
 /**
@@ -23,18 +23,25 @@ type Options = {
   onEntry: (entry: ConsoleEntry) => void;
 };
 
-// Each captured arg is free-text-scrubbed (Bearer/JWT/sensitive XML) — apps
-// commonly log auth responses, and console entries land in the public replay.
+// Each captured arg is redacted before it lands in the public replay — apps
+// commonly log auth responses / debug objects. Object args get the SAME
+// key-based masking as network bodies (#4): `console.log({ password })` was
+// previously only free-text-scrubbed (Bearer/JWT), leaking the value.
 const stringifyArg = (arg: unknown): string => {
   if (typeof arg === 'string') return redactFreeText(arg);
   if (arg instanceof Error) return redactFreeText(arg.message);
+  // Serialize FIRST so JSON.stringify handles circular refs (throws → caught)
+  // and getters/toJSON safely; never walk the live object. Then reuse the
+  // already-verified sanitizeNetworkBody (JSON key-masking, falls back to
+  // free-text on non-JSON), and still run redactFreeText for Bearer-in-value.
   let s: string;
   try {
     s = JSON.stringify(arg);
   } catch {
     s = String(arg);
   }
-  return redactFreeText(s ?? String(arg));
+  s = s ?? String(arg);
+  return redactFreeText(sanitizeNetworkBody(s, 'application/json') ?? s);
 };
 
 const extractStack = (args: unknown[]): string | undefined => {

@@ -162,3 +162,31 @@ describe('console-patch — grouping markers', () => {
     expect(groupEndIdx).toBeGreaterThan(logIdx);
   });
 });
+
+// #4: object console args must get the SAME key-based masking as network bodies.
+// Previously they were only free-text-scrubbed (Bearer/JWT), leaking e.g.
+// console.log({ password }). Reuses @bugzar/shared sanitizeNetworkBody.
+describe('object arg key-based redaction (#4)', () => {
+  it('redacts sensitive keys in a logged object, keeps benign fields', () => {
+    console.log({ password: 'hunter2', apiKey: 'sk_live_xyz', note: 'ok' });
+    const joined = entries.at(-1)!.args.join(' ');
+    expect(joined).not.toContain('hunter2');
+    expect(joined).not.toContain('sk_live_xyz');
+    expect(joined).toContain('[REDACTED]');
+    expect(joined).toContain('ok'); // benign preserved
+  });
+
+  it('still redacts a Bearer token inside a string arg (existing behavior kept)', () => {
+    console.warn('auth failed', 'Authorization: Bearer sk_live_abc');
+    const joined = entries.at(-1)!.args.join(' ');
+    expect(joined).not.toContain('sk_live_abc');
+    expect(joined).toContain('Bearer [REDACTED]');
+  });
+
+  it('does not throw on a circular object — an entry is still produced', () => {
+    const circular: Record<string, unknown> = { a: 1 };
+    circular.self = circular;
+    expect(() => console.log(circular)).not.toThrow();
+    expect(entries.length).toBeGreaterThan(0);
+  });
+});
