@@ -154,3 +154,44 @@ describe('DesignView', () => {
     expect(screen.getAllByText('Copy for AI').length).toBe(2);
   });
 });
+
+// #1: the design replay HTML is public-by-URL. A figmaUrl is attacker-influenced
+// (free-text picker input round-tripped through the export). Only http(s) may
+// render as an href — a javascript:/data: value would execute on click.
+describe('figmaUrl XSS guard (#1)', () => {
+  it('renders the Figma link for an http(s) figmaUrl', () => {
+    render(<DesignView elements={elements} events={SNAPSHOT} />);
+    const link = screen.getByRole('link', { name: /Figma/ });
+    expect(link.getAttribute('href')).toBe('https://figma.com/file/abc');
+  });
+
+  it('does NOT render a link for a javascript: figmaUrl', () => {
+    const evil: DesignElement[] = [
+      { ...(elements[1] as DesignElement), figmaUrl: 'javascript:alert(document.cookie)' },
+    ];
+    render(<DesignView elements={evil} events={SNAPSHOT} />);
+    expect(screen.queryByRole('link', { name: /Figma/ })).toBeNull();
+  });
+
+  it('does NOT render a link for a data: figmaUrl', () => {
+    const evil: DesignElement[] = [
+      { ...(elements[1] as DesignElement), figmaUrl: 'data:text/html,<script>alert(1)</script>' },
+    ];
+    render(<DesignView elements={evil} events={SNAPSHOT} />);
+    expect(screen.queryByRole('link', { name: /Figma/ })).toBeNull();
+  });
+
+  // Review follow-up: pins the INTENTIONAL pass-through of relative URLs —
+  // isSafeUrl resolves them against the page, so they can only ever be
+  // http/https and can't carry an executable scheme. If this ever needs
+  // tightening to absolute-only, breaking this test makes it a deliberate call.
+  it('still renders a link for a relative figmaUrl (resolves to http/https)', () => {
+    const rel: DesignElement[] = [
+      { ...(elements[1] as DesignElement), figmaUrl: '/files/design-spec' },
+    ];
+    render(<DesignView elements={rel} events={SNAPSHOT} />);
+    expect(screen.getByRole('link', { name: /Figma/ }).getAttribute('href')).toBe(
+      '/files/design-spec',
+    );
+  });
+});

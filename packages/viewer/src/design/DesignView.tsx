@@ -4,6 +4,7 @@
 // note applies. Falls back to imageless cards when no snapshot was captured.
 
 import type { RrwebEvent, WebVitals } from '@bugzar/shared';
+import { isSafeUrl } from '@bugzar/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Replayer } from 'rrweb';
 import { SystemInfoPanel } from '../panels/SystemInfoPanel';
@@ -278,7 +279,9 @@ export function DesignView({ elements, events, pageUrl, system, meta, vitals }: 
                   </span>
                 </button>
                 <div className="bugzarv-dz-itemactions">
-                  {el.figmaUrl ? (
+                  {/* #1: only http/https figmaUrls render — a javascript:/data:
+                      value would execute in the public-by-URL report on click. */}
+                  {isSafeUrl(el.figmaUrl) ? (
                     <a
                       className="bugzarv-dz-figma"
                       href={el.figmaUrl}
