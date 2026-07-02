@@ -1,9 +1,10 @@
 import { NETWORK_BODY_MAX_BYTES } from '@bugzar/shared';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetNetworkBudget,
   capBody,
   installNetworkPatch,
+  sanitizeHeaders,
   uninstallNetworkPatch,
 } from './network-patch';
 
@@ -116,5 +117,58 @@ describe('uninstallNetworkPatch — stack-safe restore (#48)', () => {
 
     expect(XMLHttpRequest.prototype.open).toBe(later);
     XMLHttpRequest.prototype.open = original; // normalize
+  });
+});
+
+// #6: header redaction now uses the shared deny-by-default isSensitiveHeader.
+// (Tested via a plain-object header map — the happy-dom env can't exercise the
+// Headers-instance branch, but a real browser hits `instanceof Headers` = true.)
+describe('sanitizeHeaders — deny-by-default custom auth headers (#6)', () => {
+  it('redacts custom auth/csrf/session headers, keeps content-type', () => {
+    const out = sanitizeHeaders({
+      'x-access-token': 'a',
+      'x-csrf-token': 'b',
+      'x-session-id': 'c',
+      authentication: 'd',
+      'x-amz-security-token': 'e',
+      'content-type': 'application/json',
+      'content-length': '42',
+    });
+    expect(out['x-access-token']).toBe('[REDACTED]');
+    expect(out['x-csrf-token']).toBe('[REDACTED]');
+    expect(out['x-session-id']).toBe('[REDACTED]');
+    expect(out.authentication).toBe('[REDACTED]');
+    expect(out['x-amz-security-token']).toBe('[REDACTED]');
+    expect(out['content-type']).toBe('application/json'); // survives (downstream needs it)
+    expect(out['content-length']).toBe('42');
+  });
+});
+
+// #5: the fetch wrapper feeds req.url through sanitizeUrl before recording, so
+// query-string secrets never reach the captured entry (end-to-end).
+describe('capture redaction — URL query secrets (#5)', () => {
+  let origFetch: typeof window.fetch;
+  beforeEach(() => {
+    __resetNetworkBudget();
+    origFetch = window.fetch;
+  });
+  afterEach(() => {
+    uninstallNetworkPatch();
+    window.fetch = origFetch;
+  });
+
+  it('redacts credential query params in the captured fetch entry, keeps benign + host/path', async () => {
+    window.fetch = (async () =>
+      new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof window.fetch;
+
+    const entries: Array<{ url: string }> = [];
+    installNetworkPatch({ sessionStart: 0, onEntry: (e) => entries.push(e as never) });
+
+    await window.fetch('https://api.x/v1?token=SECRET&api_key=K&page=2');
+
+    expect(entries[0]?.url).toBe('https://api.x/v1?token=[REDACTED]&api_key=[REDACTED]&page=2');
   });
 });

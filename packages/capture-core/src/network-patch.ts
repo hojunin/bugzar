@@ -1,8 +1,10 @@
 import {
+  isSensitiveHeader,
   NETWORK_BODY_MAX_BYTES,
   NETWORK_TOTAL_BUDGET_BYTES,
   type NetworkEntryPayload,
   sanitizeNetworkBody,
+  sanitizeUrl,
 } from '@bugzar/shared';
 
 /**
@@ -21,20 +23,17 @@ import {
  * here. For M1+ we strip a basic set of credential headers.
  */
 
-const REDACT_HEADER = new Set([
-  'authorization',
-  'cookie',
-  'set-cookie',
-  'x-api-key',
-  'x-auth-token',
-]);
-
 const REDACTED = '[REDACTED]';
 
-const sanitizeHeaders = (h: Headers | Record<string, string>): Record<string, string> => {
+// Exported for tests (the happy-dom test env can't exercise it via a real
+// Headers instance — cross-realm `instanceof Headers` is false there).
+export const sanitizeHeaders = (h: Headers | Record<string, string>): Record<string, string> => {
   const out: Record<string, string> = {};
   const apply = (k: string, v: string): void => {
-    out[k] = REDACT_HEADER.has(k.toLowerCase()) ? REDACTED : v;
+    // Deny-by-default substring matcher (#6) — catches custom auth/session/csrf
+    // headers the old 5-name exact-match list missed. content-type isn't
+    // sensitive, so it survives for the body content-type lookup below.
+    out[k] = isSensitiveHeader(k) ? REDACTED : v;
   };
   if (h instanceof Headers) {
     h.forEach((v, k) => {
@@ -142,7 +141,8 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
     const tFromStart = startedMs - sessionStart;
     const req = new Request(input, init);
     const method = req.method || 'GET';
-    const url = req.url;
+    // #5: strip credential query/fragment params so they never reach the report.
+    const url = sanitizeUrl(req.url);
     const requestHeaders = sanitizeHeaders(req.headers);
     let requestBody: string | null = null;
     try {
@@ -231,7 +231,8 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
   ) {
     this.__bugzar = {
       method: method.toUpperCase(),
-      url: typeof url === 'string' ? url : url.toString(),
+      // #5: sanitize at store time so the raw URL (query secrets) is never retained.
+      url: sanitizeUrl(typeof url === 'string' ? url : url.toString()),
       startedMs: 0,
       requestHeaders: {},
       requestBody: null,
@@ -247,7 +248,7 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
     value: string,
   ) {
     if (this.__bugzar) {
-      this.__bugzar.requestHeaders[name] = REDACT_HEADER.has(name.toLowerCase()) ? REDACTED : value;
+      this.__bugzar.requestHeaders[name] = isSensitiveHeader(name) ? REDACTED : value;
     }
     // biome-ignore lint/style/noNonNullAssertion: original captured above
     return originalXHRSetRequestHeader!.call(this, name, value);
@@ -261,8 +262,8 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
       this.__bugzar.startedMs = Date.now();
       void stringifyBody(body).then((s) => {
         if (this.__bugzar) {
-          // Pull Content-Type from already-captured request headers (the
-          // header is not on our REDACT_HEADER list, so it survives intact).
+          // Pull Content-Type from already-captured request headers (content-type
+          // isn't sensitive per isSensitiveHeader, so it survives intact).
           // Lookup is case-insensitive since setRequestHeader preserves
           // the caller's casing.
           const rh = this.__bugzar.requestHeaders;
@@ -300,7 +301,7 @@ export const installNetworkPatch = ({ sessionStart, onEntry }: Options): void =>
           if (idx > 0) {
             const k = line.slice(0, idx).trim();
             const v = line.slice(idx + 1).trim();
-            responseHeaders[k] = REDACT_HEADER.has(k.toLowerCase()) ? REDACTED : v;
+            responseHeaders[k] = isSensitiveHeader(k) ? REDACTED : v;
           }
         }
         onEntry({
