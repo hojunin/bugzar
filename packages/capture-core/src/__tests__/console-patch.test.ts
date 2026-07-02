@@ -189,4 +189,19 @@ describe('object arg key-based redaction (#4)', () => {
     expect(() => console.log(circular)).not.toThrow();
     expect(entries.length).toBeGreaterThan(0);
   });
+
+  // Review follow-up: a JSON STRING arg must not sidestep the key masking —
+  // console.log(JSON.stringify({ password })) is the same leak in string form.
+  it('key-masks a JSON string arg too', () => {
+    console.log(JSON.stringify({ password: 'hunter2', note: 'ok' }));
+    const joined = entries.at(-1)!.args.join(' ');
+    expect(joined).not.toContain('hunter2');
+    expect(joined).toContain('[REDACTED]');
+    expect(joined).toContain('ok');
+  });
+
+  it('leaves plain prose string args untouched', () => {
+    console.log('user clicked the save button 3 times');
+    expect(entries.at(-1)!.args[0]).toBe('user clicked the save button 3 times');
+  });
 });

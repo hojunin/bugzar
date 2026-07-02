@@ -28,7 +28,12 @@ type Options = {
 // key-based masking as network bodies (#4): `console.log({ password })` was
 // previously only free-text-scrubbed (Bearer/JWT), leaking the value.
 const stringifyArg = (arg: unknown): string => {
-  if (typeof arg === 'string') return redactFreeText(arg);
+  // String args go through the same sanitizer with shape-sniffing (no content
+  // type to trust): a JSON/url-encoded STRING gets key-masking too, so
+  // `console.log(JSON.stringify({ password }))` can't sidestep #4. Prose falls
+  // through to the free-text scrub unchanged; the trade-off is that a logged
+  // pretty-printed JSON string is re-serialized compact.
+  if (typeof arg === 'string') return redactFreeText(sanitizeNetworkBody(arg, null) ?? arg);
   if (arg instanceof Error) return redactFreeText(arg.message);
   // Serialize FIRST so JSON.stringify handles circular refs (throws → caught)
   // and getters/toJSON safely; never walk the live object. Then reuse the
