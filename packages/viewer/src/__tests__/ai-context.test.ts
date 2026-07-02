@@ -146,11 +146,10 @@ describe('redaction-preservation (safety bar)', () => {
     expect(out).toContain('Bearer [REDACTED]');
   });
 
-  it('documents the benign-key PII gap (capture-layer; surfaced, not silently hidden)', () => {
-    // Capture redaction masks by sensitive KEY + JWT; PII under a benign key
-    // (email) is caught by neither capture nor the copy redactFreeText pass.
-    // Asserting it explicitly keeps the gap KNOWN (never a silent surprise); a
-    // capture-layer fix is tracked separately (out of R1 scope).
+  it('closes the benign-key PII gap — email is redacted (#3)', () => {
+    // Previously PII under a benign key (email) was caught by neither capture nor
+    // the copy redactFreeText pass. #3 wired redactPiiText into redactFreeText, so
+    // the copy path now masks email/phone/card even under benign keys.
     const out = formatSessionForAI(
       base({
         network: [
@@ -164,7 +163,7 @@ describe('redaction-preservation (safety bar)', () => {
       }),
     );
     expect(out).not.toContain(JWT); // JWT pattern IS caught
-    expect(out).toContain('user@acme.com'); // benign-key email is NOT (known gap)
+    expect(out).not.toContain('user@acme.com'); // #3: benign-key email now redacted
   });
 
   it('per-item copies are redacted too', () => {

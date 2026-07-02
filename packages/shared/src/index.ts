@@ -3,6 +3,7 @@ export * from './manifest-schema';
 export * from './messages';
 export * from './network-limits';
 export * from './repro-actions';
+export * from './safe-url';
 export * from './sanitize-network-body';
 export * from './serialize-state';
 export * from './time';
