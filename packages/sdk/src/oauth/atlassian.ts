@@ -116,9 +116,23 @@ export const buildAuthorizeUrl = (params: {
 
 const STORAGE_KEY = 'bugzar:atlassian';
 
+// The long-lived refresh token (offline_access) is the highest-value credential;
+// persisting it in localStorage lets any same-origin script exfiltrate it (#2).
+// Keep it ONLY in memory for the tab's lifetime; localStorage holds a session
+// whose refreshToken is always null. Trade-off: a full page reload loses it, so
+// the user re-authenticates once the access token expires (IETF in-memory posture
+// for browser-based apps — refresh tokens SHOULD NOT live in web storage).
+let inMemoryRefreshToken: string | null = null;
+
 export const saveSession = (session: AtlassianSession): void => {
+  inMemoryRefreshToken = session.tokens.refreshToken ?? null;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    // Never persist the refresh token — redact it to null before writing.
+    const persisted: AtlassianSession = {
+      ...session,
+      tokens: { ...session.tokens, refreshToken: null },
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   } catch {
     // private mode / storage disabled — connection just won't persist
   }
@@ -129,7 +143,11 @@ export const loadSession = (): AtlassianSession | null => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const v = JSON.parse(raw) as AtlassianSession;
-    if (v?.tokens?.accessToken && v?.site?.id) return v;
+    if (v?.tokens?.accessToken && v?.site?.id) {
+      // Re-attach the in-memory refresh token so same-tab SPA navigations keep
+      // the ability to refresh; a fresh page load has none (stays null → re-auth).
+      return { ...v, tokens: { ...v.tokens, refreshToken: inMemoryRefreshToken } };
+    }
     return null;
   } catch {
     return null;
@@ -137,6 +155,7 @@ export const loadSession = (): AtlassianSession | null => {
 };
 
 export const clearSession = (): void => {
+  inMemoryRefreshToken = null; // disconnect fully revokes local custody
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
