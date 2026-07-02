@@ -25,8 +25,8 @@ import {
 
 const REDACTED = '[REDACTED]';
 
-// Exported for tests (the happy-dom test env can't exercise it via a real
-// Headers instance — cross-realm `instanceof Headers` is false there).
+// Exported for tests (a `new Request().headers` is cross-realm in happy-dom —
+// tests pass a plain map or a same-realm `new Headers()` directly instead).
 export const sanitizeHeaders = (h: Headers | Record<string, string>): Record<string, string> => {
   const out: Record<string, string> = {};
   const apply = (k: string, v: string): void => {

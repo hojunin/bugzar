@@ -121,8 +121,9 @@ describe('uninstallNetworkPatch — stack-safe restore (#48)', () => {
 });
 
 // #6: header redaction now uses the shared deny-by-default isSensitiveHeader.
-// (Tested via a plain-object header map — the happy-dom env can't exercise the
-// Headers-instance branch, but a real browser hits `instanceof Headers` = true.)
+// (A `new Request().headers` is cross-realm in happy-dom, so `instanceof
+// Headers` is false there — but a same-realm `new Headers()` constructed in
+// the test does exercise the Headers-instance branch.)
 describe('sanitizeHeaders — deny-by-default custom auth headers (#6)', () => {
   it('redacts custom auth/csrf/session headers, keeps content-type', () => {
     const out = sanitizeHeaders({
@@ -141,6 +142,19 @@ describe('sanitizeHeaders — deny-by-default custom auth headers (#6)', () => {
     expect(out['x-amz-security-token']).toBe('[REDACTED]');
     expect(out['content-type']).toBe('application/json'); // survives (downstream needs it)
     expect(out['content-length']).toBe('42');
+  });
+
+  it('redacts through the Headers-instance branch too (same-realm Headers)', () => {
+    const out = sanitizeHeaders(
+      new Headers({
+        'x-csrf-token': 'b',
+        authorization: 'Bearer t',
+        'content-type': 'application/json',
+      }),
+    );
+    expect(out['x-csrf-token']).toBe('[REDACTED]');
+    expect(out.authorization).toBe('[REDACTED]');
+    expect(out['content-type']).toBe('application/json');
   });
 });
 
