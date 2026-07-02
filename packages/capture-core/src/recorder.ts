@@ -8,6 +8,7 @@ import type {
   StorageSnapshotPayload,
   SystemInfo,
 } from '@bugzar/shared';
+import { sanitizeUrl } from '@bugzar/shared';
 import { installConsolePatch, uninstallConsolePatch } from './console-patch';
 import { installNetworkPatch, uninstallNetworkPatch } from './network-patch';
 import { flushResourceTiming, installResourceTimingPatch } from './resource-timing-patch';
@@ -61,7 +62,8 @@ export interface Recorder {
 }
 
 const readMeta = (startedAt: number, endedAt: number): SessionMeta => ({
-  url: typeof location !== 'undefined' ? location.href : '',
+  // #5: strip credential query/fragment params from the captured page URL.
+  url: typeof location !== 'undefined' ? sanitizeUrl(location.href) : '',
   userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
   viewport: {
     width: typeof window !== 'undefined' ? window.innerWidth : 0,
