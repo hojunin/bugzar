@@ -1,5 +1,6 @@
 import { getStrings, type Strings } from '../i18n';
 import type { DesignAnnotation } from '../public-types';
+import { isSafeUrl } from '../safe-url';
 import { injectStyles } from '../styles';
 import { extractAnnotation } from './meta';
 
@@ -267,8 +268,10 @@ export function startDesignPick({
     const textarea = pending.pop.querySelector('textarea');
     const figmaInput = pending.pop.querySelector<HTMLInputElement>('.bugzar-pick-pop-figma');
     pending.ann.note = textarea ? textarea.value : '';
+    // #1: only store http/https — never persist a javascript:/data: figmaUrl
+    // that would later render as an executable href in the exported report.
     const figmaUrl = figmaInput?.value.trim();
-    if (figmaUrl) pending.ann.figmaUrl = figmaUrl;
+    if (isSafeUrl(figmaUrl)) pending.ann.figmaUrl = figmaUrl;
     else delete pending.ann.figmaUrl;
     // New picks are appended; an edit mutates the existing annotation in place.
     if (pending.isNew) {

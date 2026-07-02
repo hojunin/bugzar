@@ -172,6 +172,35 @@ describe('startDesignPick', () => {
     expect(captured?.[0]?.figmaUrl).toBe('https://figma.com/file/abc');
   });
 
+  it('does NOT store a javascript: figmaUrl — XSS input guard (#1)', () => {
+    const target = document.createElement('a');
+    target.textContent = 'Link';
+    document.body.appendChild(target);
+
+    let result: { figmaUrl?: string }[] | null = null;
+    startDesignPick({ onComplete: (anns) => (result = anns as typeof result) });
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    const popover = document.querySelector('.bugzar-pick-popover');
+    (popover?.querySelector('textarea') as HTMLTextAreaElement).value = 'note';
+    (popover?.querySelector('.bugzar-pick-pop-figma') as HTMLInputElement).value =
+      'javascript:alert(document.cookie)';
+    (
+      [...document.querySelectorAll('.bugzar-pick-popover .bugzar-pick-btn-primary')].find(
+        (b) => b.textContent === 'Add',
+      ) as HTMLButtonElement
+    ).click();
+    (
+      [...document.querySelectorAll('.bugzar-pick-btn-primary')].find(
+        (b) => b.textContent === 'Done',
+      ) as HTMLButtonElement
+    ).click();
+
+    const captured = result as { figmaUrl?: string }[] | null;
+    expect(captured).toHaveLength(1);
+    expect(captured?.[0]?.figmaUrl).toBeUndefined(); // unsafe value never stored
+  });
+
   // Helper: pick `target` and save a note, returning when the bar shows the chip.
   const pickWithNote = (target: Element, note: string): void => {
     target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
