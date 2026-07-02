@@ -390,6 +390,14 @@ describe('PII key patterns (#3) — narrow, no over-redaction', () => {
     expect(isSensitiveKey('telemetry')).toBe(false);
     expect(isSensitiveKey('description')).toBe(false);
   });
+  it('documents the accepted `mobile` over-redaction (device keys; safe direction)', () => {
+    // KNOWN FP: `mobile` also matches device-telemetry keys. Redacting them only
+    // loses debug info (never leaks data), so the broad match is deliberate.
+    // If real reports lose too much signal, narrow to compound forms like `tel`.
+    expect(isSensitiveKey('mobileVersion')).toBe(true);
+    expect(isSensitiveKey('isMobile')).toBe(true);
+    expect(isSensitiveKey('mobileNumber')).toBe(true); // the PII target
+  });
 });
 
 describe('redactPiiText (#3) — email / phone / Luhn card', () => {
@@ -441,6 +449,12 @@ describe('isSensitiveHeader (#6) — substring, deny-by-default', () => {
     expect(isSensitiveHeader('content-type')).toBe(false);
     expect(isSensitiveHeader('content-length')).toBe(false);
     expect(isSensitiveHeader('accept')).toBe(false);
+  });
+  it('documents the accepted www-authenticate over-redaction (challenge, not a credential)', () => {
+    // KNOWN FP of the `auth` substring: www-authenticate is a challenge header.
+    // Only the captured copy is masked (never the live request) — harmless,
+    // kept for deny-by-default simplicity.
+    expect(isSensitiveHeader('www-authenticate')).toBe(true);
   });
 });
 

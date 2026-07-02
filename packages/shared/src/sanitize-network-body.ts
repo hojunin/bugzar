@@ -56,6 +56,9 @@ const SENSITIVE_KEY_PATTERNS = [
   // PII (#3). Deliberately COMPOUND substrings so they only hit PII fields:
   // no bare `name` (would hit filename/username/event_name), no bare `address`
   // (ip_address/mac_address), no bare `tel` (telemetry/hotel).
+  // Known accepted over-redaction: `mobile` also hits device-telemetry keys
+  // (mobileVersion/isMobile) — that only costs debug info, never leaks data.
+  // Narrow it like `tel` if real reports lose too much signal.
   'email',
   'e-mail',
   'phone',
