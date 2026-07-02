@@ -53,14 +53,13 @@ describe('isSensitiveKey', () => {
     expect(_internal.isSensitiveKey(key)).toBe(expected);
   });
 
+  // email / phoneNumber moved to sensitive (#3 PII) — see the PII key patterns test.
   it.each([
     ['username', false],
-    ['email', false],
     ['name', false],
     ['description', false],
     ['bookmark', false],
     ['address', false],
-    ['phoneNumber', false],
     ['createdAt', false],
     ['locale', false],
     ['productId', false],
@@ -81,7 +80,7 @@ describe('maskJsonValue', () => {
     const out = _internal.maskJsonValue(input) as Record<string, unknown>;
     expect(out.username).toBe('alice');
     expect(out.password).toBe('[REDACTED]');
-    expect(out.email).toBe('alice@example.com');
+    expect(out.email).toBe('[REDACTED]'); // #3: email is now a PII key
     expect((out.meta as Record<string, unknown>).token).toBe('[REDACTED]');
     expect((out.meta as Record<string, unknown>).name).toBe('Alice');
   });
@@ -297,7 +296,7 @@ describe('sanitizeNetworkBody', () => {
       const sanitized = sanitizeNetworkBody(captured, 'application/json');
       expect(sanitized).not.toContain('TestPassword123!');
       const parsed = JSON.parse(sanitized as string);
-      expect(parsed.email).toBe('qa-tester@musinsa.com'); // not over-masked
+      expect(parsed.email).toBe('[REDACTED]'); // #3: email is now redacted (PII)
       expect(parsed.rememberMe).toBe(true);
     });
 
@@ -370,5 +369,102 @@ describe('sanitizeStorageValue', () => {
 
   it('leaves a benign value untouched', () => {
     expect(sanitizeStorageValue('theme', 'dark')).toBe('dark');
+  });
+});
+
+// ── PR-1 shared foundation (#3/#5/#6) ──
+describe('PII key patterns (#3) — narrow, no over-redaction', () => {
+  const { isSensitiveKey } = _internal;
+  it('matches compound PII field names', () => {
+    expect(isSensitiveKey('email')).toBe(true);
+    expect(isSensitiveKey('firstName')).toBe(true);
+    expect(isSensitiveKey('user_last_name')).toBe(true);
+    expect(isSensitiveKey('creditCard')).toBe(true);
+    expect(isSensitiveKey('postal_code')).toBe(true);
+  });
+  it('does NOT match benign look-alikes (bare name/address/tel avoided)', () => {
+    expect(isSensitiveKey('filename')).toBe(false);
+    expect(isSensitiveKey('name')).toBe(false);
+    expect(isSensitiveKey('ip_address')).toBe(false);
+    expect(isSensitiveKey('mac_address')).toBe(false);
+    expect(isSensitiveKey('telemetry')).toBe(false);
+    expect(isSensitiveKey('description')).toBe(false);
+  });
+});
+
+describe('redactPiiText (#3) — email / phone / Luhn card', () => {
+  const { redactPiiText } = _internal;
+  it('masks email, preserving the boundary', () => {
+    expect(redactPiiText('mail me at a.b+x@corp.co.uk please')).toBe(
+      'mail me at [REDACTED] please',
+    );
+  });
+  it('masks E.164 and delimited phones, not bare digit runs', () => {
+    expect(redactPiiText('call +14155550123')).toBe('call [REDACTED]');
+    expect(redactPiiText('tel 415-555-0123')).toBe('tel [REDACTED]');
+    expect(redactPiiText('order 12345678 shipped')).toBe('order 12345678 shipped');
+  });
+  it('masks a Luhn-valid card but leaves non-card digit runs', () => {
+    expect(redactPiiText('card 4111 1111 1111 1111 end')).toBe('card [REDACTED] end');
+    expect(redactPiiText('id 1234567812345678')).toBe('id 1234567812345678'); // fails Luhn
+  });
+  it('is idempotent on [REDACTED]', () => {
+    expect(redactPiiText('[REDACTED]')).toBe('[REDACTED]');
+  });
+});
+
+describe('maskJsonValue PII under benign keys (#3)', () => {
+  const { maskJsonValue } = _internal;
+  it('scrubs email in a value even when the key is benign', () => {
+    const out = maskJsonValue({ note: 'ping a@b.com', profile: { email: 'x@y.io' } });
+    expect(JSON.stringify(out)).not.toContain('a@b.com'); // value-level scrub
+    expect(JSON.stringify(out)).not.toContain('x@y.io'); // key-level (email key)
+  });
+});
+
+describe('isSensitiveHeader (#6) — substring, deny-by-default', () => {
+  const { isSensitiveHeader } = _internal;
+  it('catches custom auth/session/csrf headers incl. IANA standard ones', () => {
+    for (const h of [
+      'authorization',
+      'x-access-token',
+      'x-csrf-token',
+      'x-session-id',
+      'authentication',
+      'proxy-authorization',
+      'x-amz-security-token',
+    ]) {
+      expect(isSensitiveHeader(h)).toBe(true);
+    }
+  });
+  it('leaves benign headers intact (content-type must survive)', () => {
+    expect(isSensitiveHeader('content-type')).toBe(false);
+    expect(isSensitiveHeader('content-length')).toBe(false);
+    expect(isSensitiveHeader('accept')).toBe(false);
+  });
+});
+
+describe('sanitizeUrl (#5) — credential query params only', () => {
+  const { sanitizeUrl } = _internal;
+  it('redacts credential param values, keeps host/path and benign params', () => {
+    expect(sanitizeUrl('https://api.x/v1?token=abc&page=2')).toBe(
+      'https://api.x/v1?token=[REDACTED]&page=2',
+    );
+    expect(sanitizeUrl('https://x/cb?code=AUTHZ&state=s')).toBe(
+      'https://x/cb?code=[REDACTED]&state=[REDACTED]',
+    );
+  });
+  it('does NOT redact benign / PII-but-not-credential params', () => {
+    expect(sanitizeUrl('https://x/y?q=1')).toBe('https://x/y?q=1');
+    expect(sanitizeUrl('https://x/y?postal_code=90210')).toBe('https://x/y?postal_code=90210');
+  });
+  it('redacts implicit-flow token in the URL fragment', () => {
+    expect(sanitizeUrl('https://x/#access_token=xyz&scope=read')).toBe(
+      'https://x/#access_token=[REDACTED]&scope=read',
+    );
+  });
+  it('leaves URLs with no query/fragment untouched (relative ok)', () => {
+    expect(sanitizeUrl('/r/abc')).toBe('/r/abc');
+    expect(sanitizeUrl('https://x/path')).toBe('https://x/path');
   });
 });

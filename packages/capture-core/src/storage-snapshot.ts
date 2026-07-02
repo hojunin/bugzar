@@ -30,6 +30,10 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let active = false;
 let captureCookiesFlag = false;
 
+// The SDK's own storage keys (Atlassian session etc.) hold a refresh token and
+// the user's email — never snapshot them into the shareable replay (#3).
+const isOwnStorageKey = (key: string): boolean => key.startsWith('bugzar:');
+
 const snapshotOnce = (sessionStart: number): StorageSnapshotPayload => {
   // Values are redacted at capture time (sensitive key / bare JWT / JSON token
   // leaves) so auth tokens stashed in storage never reach the public replay.
@@ -37,7 +41,7 @@ const snapshotOnce = (sessionStart: number): StorageSnapshotPayload => {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key != null)
+      if (key != null && !isOwnStorageKey(key))
         localStorageEntries[key] = sanitizeStorageValue(key, localStorage.getItem(key) ?? '');
     }
   } catch {
@@ -48,7 +52,7 @@ const snapshotOnce = (sessionStart: number): StorageSnapshotPayload => {
   try {
     for (let i = 0; i < sessionStorage.length; i++) {
       const key = sessionStorage.key(i);
-      if (key != null)
+      if (key != null && !isOwnStorageKey(key))
         sessionStorageEntries[key] = sanitizeStorageValue(key, sessionStorage.getItem(key) ?? '');
     }
   } catch {

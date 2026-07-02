@@ -53,11 +53,123 @@ const SENSITIVE_KEY_PATTERNS = [
   'sessionid',
   'cookie',
   'pwd',
+  // PII (#3). Deliberately COMPOUND substrings so they only hit PII fields:
+  // no bare `name` (would hit filename/username/event_name), no bare `address`
+  // (ip_address/mac_address), no bare `tel` (telemetry/hotel).
+  'email',
+  'e-mail',
+  'phone',
+  'mobile',
+  'telephone',
+  'firstname',
+  'first_name',
+  'lastname',
+  'last_name',
+  'fullname',
+  'full_name',
+  'surname',
+  'ssn',
+  'social_security',
+  'passport',
+  'tax_id',
+  'creditcard',
+  'credit_card',
+  'cardnumber',
+  'card_number',
+  'cvv',
+  'cvc',
+  'iban',
+  'street_address',
+  'postal_code',
+  'postcode',
+  'zipcode',
+  'zip_code',
 ] as const;
 
 export const isSensitiveKey = (name: string): boolean => {
   const lower = name.toLowerCase();
   return SENSITIVE_KEY_PATTERNS.some((pat) => lower.includes(pat));
+};
+
+// HTTP header names carrying credentials that `isSensitiveKey` doesn't already
+// catch — deny-by-default vs the old 5-name exact-match list (#6). `content-type`
+// / `content-length` / `accept` match none of these and survive intact.
+const SENSITIVE_HEADER_EXTRA = ['auth', 'session', 'csrf', 'xsrf', 'bearer'];
+
+/** True if an HTTP header NAME carries credentials and its value must be redacted. */
+export const isSensitiveHeader = (name: string): boolean => {
+  if (isSensitiveKey(name)) return true;
+  const lower = name.toLowerCase();
+  return SENSITIVE_HEADER_EXTRA.some((p) => lower.includes(p));
+};
+
+// URL query/fragment param names whose VALUE is a credential (#5). Intentionally
+// CREDENTIAL-focused, NOT the full isSensitiveKey — URLs commonly carry benign
+// contextual PII (e.g. `postal_code`) that should NOT be redacted, and #5 targets
+// secrets. Short names ('code', 'sig', 'state', 'key') are EXACT-match so they
+// don't over-hit `postal_code` / `sortKey` etc.
+const URL_CRED_SUBSTR = [
+  'token',
+  'secret',
+  'password',
+  'passwd',
+  'apikey',
+  'api_key',
+  'api-key',
+  'access_key',
+  'credential',
+  'authorization',
+  'session_id',
+];
+const URL_CRED_EXACT = new Set([
+  'code',
+  'sig',
+  'signature',
+  'state',
+  'key',
+  'auth',
+  'sid',
+  'session',
+  'pwd',
+]);
+const isSensitiveParamName = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return URL_CRED_EXACT.has(lower) || URL_CRED_SUBSTR.some((p) => lower.includes(p));
+};
+
+const safeDecode = (s: string): string => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+};
+
+const redactQueryString = (qs: string): string =>
+  qs
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq < 0) return pair;
+      const name = pair.slice(0, eq);
+      return isSensitiveParamName(safeDecode(name)) ? `${name}=${REDACTED}` : pair;
+    })
+    .join('&');
+
+/**
+ * Redact credential VALUES in a URL's query string and (key=value) fragment,
+ * preserving scheme/host/path so the entry stays debuggable (#5). String-based so
+ * relative URLs keep their relativity; malformed input is returned unchanged.
+ */
+export const sanitizeUrl = (url: string): string => {
+  if (!url || (!url.includes('?') && !url.includes('#'))) return url;
+  const hashIdx = url.indexOf('#');
+  const base = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+  const frag = hashIdx >= 0 ? url.slice(hashIdx + 1) : null;
+  const qIdx = base.indexOf('?');
+  let out = qIdx >= 0 ? `${base.slice(0, qIdx)}?${redactQueryString(base.slice(qIdx + 1))}` : base;
+  if (frag != null) out += frag.includes('=') ? `#${redactQueryString(frag)}` : `#${frag}`;
+  return out;
 };
 
 /**
@@ -101,20 +213,66 @@ const JWT_INLINE_RE =
 const XML_SENSITIVE_RE =
   /(<([a-zA-Z0-9:_-]*(?:password|passwd|pwd|secret|token|credential|apikey)[a-zA-Z0-9:_-]*)>)([^<]*)(<\/\2>)/gi;
 
+// PII value scanners (#3) — high-precision shapes so ordinary prose survives.
+// Leading boundaries are CAPTURE GROUPS, never lookbehind (a lookbehind literal
+// is a parse-time SyntaxError on Safari < 16.4 and would abort the SDK at import).
+const EMAIL_RE = /(^|[^\w.+-])([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/g;
+// E.164 (+ country code) OR a delimited local grouping — NOT any bare digit run
+// (which would eat IDs, prices, timestamps).
+const PHONE_RE = /(^|[^\d+])(\+[1-9]\d{6,14}|\d{3}[-.\s]\d{3,4}[-.\s]\d{4})(?!\d)/g;
+// Candidate card: 13-19 digits with optional single space/dash separators. Masked
+// ONLY if Luhn-valid (rejects order/tracking IDs), checked in the replacer.
+const CARD_RE = /(^|[^\d])(\d(?:[ -]?\d){12,18})(?!\d)/g;
+
+/** Luhn checksum — validates a card candidate so non-card digit runs survive. */
+const luhnValid = (digits: string): boolean => {
+  let sum = 0;
+  let alt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    if (d < 0 || d > 9) return false;
+    if (alt) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+};
+
+/**
+ * Mask email / phone (E.164 or delimited) / Luhn-valid card numbers in free text,
+ * preserving the leading boundary char. Idempotent — `[REDACTED]` has no `@`,
+ * no delimited phone, and no 13-19 digit run, so re-running never re-matches.
+ */
+export const redactPiiText = (s: string): string =>
+  s
+    .replace(EMAIL_RE, (_m, pre: string) => `${pre}${REDACTED}`)
+    .replace(PHONE_RE, (_m, pre: string) => `${pre}${REDACTED}`)
+    .replace(CARD_RE, (_m, pre: string, cand: string) => {
+      const digits = cand.replace(/[ -]/g, '');
+      return digits.length >= 13 && digits.length <= 19 && luhnValid(digits)
+        ? `${pre}${REDACTED}`
+        : `${pre}${cand}`;
+    });
+
 /**
  * Best-effort redaction for free-form text (non-JSON/non-form bodies, console
- * args): mask Bearer tokens, embedded JWTs, and sensitively-named XML elements.
- * Ordinary prose passes through untouched.
+ * args): mask Bearer tokens, embedded JWTs, sensitively-named XML elements, then
+ * email/phone/card PII (#3). Ordinary prose passes through untouched.
  */
 export const redactFreeText = (s: string): string =>
-  s
-    .replace(BEARER_RE, `Bearer ${REDACTED}`)
-    // Only redact an inline match that decodes as a real JWT — preserves the
-    // leading boundary char and leaves benign dotted IDs (build/commit hashes).
-    .replace(JWT_INLINE_RE, (_m, pre: string, tok: string) =>
-      looksLikeJwt(tok) ? `${pre}${REDACTED}` : `${pre}${tok}`,
-    )
-    .replace(XML_SENSITIVE_RE, `$1${REDACTED}$4`);
+  redactPiiText(
+    s
+      .replace(BEARER_RE, `Bearer ${REDACTED}`)
+      // Only redact an inline match that decodes as a real JWT — preserves the
+      // leading boundary char and leaves benign dotted IDs (build/commit hashes).
+      .replace(JWT_INLINE_RE, (_m, pre: string, tok: string) =>
+        looksLikeJwt(tok) ? `${pre}${REDACTED}` : `${pre}${tok}`,
+      )
+      .replace(XML_SENSITIVE_RE, `$1${REDACTED}$4`),
+  );
 
 /**
  * Recursively walk a parsed JSON value, returning a new structure where
@@ -129,11 +287,12 @@ export const redactFreeText = (s: string): string =>
  *   - Sensitive keys with object/array values still get `[REDACTED]` —
  *     a nested object stored under `credentials: {...}` is whole-replaced.
  */
-const maskJsonValue = (value: unknown): unknown => {
+export const maskJsonValue = (value: unknown): unknown => {
   // A real JWT leaf is masked regardless of its key — closes the "sensitive
   // value under a benign key" gap (e.g. `{ input: "<jwt>" }`) without corrupting
   // benign JWT-shaped IDs (build/commit hashes), which `looksLikeJwt` rejects.
-  if (typeof value === 'string') return looksLikeJwt(value) ? REDACTED : value;
+  // Non-JWT string leaves are PII-scrubbed (email/phone/card under benign keys).
+  if (typeof value === 'string') return looksLikeJwt(value) ? REDACTED : redactPiiText(value);
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(maskJsonValue);
   const out: Record<string, unknown> = {};
@@ -249,8 +408,12 @@ export const sanitizeStorageValue = (key: string, value: string): string => {
 /** Exposed for tests. */
 export const _internal = {
   isSensitiveKey,
+  isSensitiveHeader,
   maskJsonValue,
   maskUrlEncoded,
   looksLikeJwt,
-  freeTextRegexes: [BEARER_RE, JWT_INLINE_RE, XML_SENSITIVE_RE],
+  redactPiiText,
+  luhnValid,
+  sanitizeUrl,
+  freeTextRegexes: [BEARER_RE, JWT_INLINE_RE, XML_SENSITIVE_RE, EMAIL_RE, PHONE_RE, CARD_RE],
 };

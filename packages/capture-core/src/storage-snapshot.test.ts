@@ -118,3 +118,39 @@ describe('installStorageSnapshot — value redaction', () => {
     expect(JSON.stringify(snap)).not.toContain(JWT);
   });
 });
+
+// #3: the SDK's own bugzar:* keys hold the Atlassian refresh token + user email.
+// They must NEVER be snapshotted into the shareable replay.
+describe('installStorageSnapshot — SDK own-key exclusion (#3)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  afterEach(() => {
+    uninstallStorageSnapshot(0);
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it('never snapshots bugzar: keys, keeps normal keys', () => {
+    localStorage.setItem(
+      'bugzar:atlassian',
+      JSON.stringify({
+        tokens: { accessToken: 'a', refreshToken: 'r' },
+        profile: { email: 'me@corp.com' },
+      }),
+    );
+    localStorage.setItem('app-theme', 'dark');
+    sessionStorage.setItem('bugzar:foo', 'secret');
+
+    const snapshots: StorageSnapshotPayload[] = [];
+    installStorageSnapshot({ sessionStart: Date.now(), onSnapshot: (s) => snapshots.push(s) });
+    uninstallStorageSnapshot(Date.now(), (s) => snapshots.push(s));
+
+    const snap = snapshots[0]!;
+    expect(snap.localStorage['bugzar:atlassian']).toBeUndefined();
+    expect(snap.sessionStorage['bugzar:foo']).toBeUndefined();
+    expect(snap.localStorage['app-theme']).toBe('dark');
+    expect(JSON.stringify(snap)).not.toContain('me@corp.com');
+  });
+});
