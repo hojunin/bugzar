@@ -206,10 +206,17 @@ the ticket is filed **as them** — no shared service account.
 ```
 
 On stop/finish the report uploads, then the drawer shows **Connect Atlassian** for
-a first-time reviewer (a login popup; tokens are saved in `localStorage` for next
-time). Once connected it shows the AI-drafted ticket + the connected account, and
-**File Jira ticket** files it as that user. The secret never touches the browser —
-only the public `clientId` is a prop; the token exchange runs on the backend.
+a first-time reviewer (a login popup; the session is saved in `localStorage` for
+next time). Once connected it shows the AI-drafted ticket + the connected account,
+and **File Jira ticket** files it as that user. The secret never touches the
+browser — only the public `clientId` is a prop; the token exchange runs on the
+backend.
+
+> **Token custody:** the long-lived **refresh token is never written to
+> `localStorage`** — it lives in memory for the tab only, so a same-origin
+> script/XSS can't steal a durable credential. The trade-off: after a full page
+> reload (or in another tab), the drawer works until the access token expires
+> (~1h), then asks the reviewer to reconnect with the same one-click popup.
 
 **One-time setup** (Atlassian admin + backend owner):
 
